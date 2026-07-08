@@ -81,7 +81,7 @@ NINA_V2 = re.compile(
     r"(?P<cam>.+?)_"
     r"gain(?P<gain>-?\d+)_"
     r"(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})_"
-    r"(?P<rot>-?[\d.]+)deg_"
+    r"(?P<rot>-?[\d.]*)deg_"      # rot may be empty (no rotator): "..._deg_..."
     r"(?P<temp>-?[\d.]+)C__"
     r"HFR(?P<hfr>[\d.]*)_"
     r"RMS(?P<rms>[\d.]*)_"
