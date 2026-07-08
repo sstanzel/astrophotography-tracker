@@ -2,16 +2,25 @@
 fits_parser.py — single source of truth for parsing science and calibration
 frame filenames out of Steve's astrophotography library.
 
-Seven filename grammars are supported.  parse(name) tries each in order and
+Nine filename grammars are supported.  parse(name) tries each in order and
 returns the first regex Match, or None.
 
 1. ASIAir science      — Light_{target}_{exp}{s|ms}_Bin{N}_{cam}_gain{G}_{dt}_[{rot}deg_]{temp}C[_{filter}]_{idx}.fit
 2. ASIAir calibration  — {type}_{exp}{s|ms}_Bin{N}_{cam}_gain{G}_{dt}_[{rot}deg_]{temp}C[_{filter}]_{idx}.fit
 3. NINA legacy         — LIGHT_{target}_{exp}s_{NxN}_{cam-with-spaces}_{gain}_{date}_{time}_{rot}_{temp}__{idx}.fits
-4. NINA v2 science     — LIGHT_{target}_{exp}s_Bin{NxN}_{cam}_gain{G}_{date}_{time}_{rot}deg_{temp}C__HFR{?}_RMS{?}_{filter}_{idx}.fits
+4. NINA v2 science     — LIGHT_{target}_{exp}s_Bin{NxN}_{cam}_gain{G}_{date}_{time}_[{filter}_]{rot}deg_{temp}C__HFR{?}_RMS{?}_{filter}_{idx}.fits
 5. NINA v2 calibration — same as #4 but target may be empty (FLAT__... etc.)
 6. ASIAir DSLR science     — Light_{target}_{exp}{s|ms}_Bin{N}_ISO{iso}_{dt}_[{rot}deg_]{temp}C_{cam}_{idx}.fit
 7. ASIAir DSLR calibration — {type}_{exp}{s|ms}_Bin{N}_ISO{iso}_{dt}_[{rot}deg_]{temp}C_{cam}_{idx}.fit
+8. ASIAir science, rot-first  — Light_{target}_{rot}deg_{exp}{s|ms}_Bin{N}_{cam}_gain{G}_{dt}_{temp}C_{idx}.fit
+9. ASIAir calibration, rot-first — {type}_{rot}deg_{exp}{s|ms}_Bin{N}_{cam}_gain{G}_{dt}_{temp}C_{idx}.fit
+
+Grammars 8-9 cover the early-2026 ASIAir firmware epoch that wrote the rotator
+angle immediately after the type/target instead of before the temperature.
+
+Non-science capture types (framing snapshots, previews) are deliberately NOT
+parsed as frames; is_non_science(name) identifies them so callers can exclude
+them from unparsed-file warnings.
 
 For DSLR captures the ISO value lands in the 'gain' group (ASIAir's ISO is the
 DSLR analogue of gain), and 'cam' is the free-text setup name the user typed
@@ -81,11 +90,12 @@ NINA_V2 = re.compile(
     r"(?P<cam>.+?)_"
     r"gain(?P<gain>-?\d+)_"
     r"(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})_"
-    r"(?P<rot>-?[\d.]*)deg_"      # rot may be empty (no rotator): "..._deg_..."
-    r"(?P<temp>-?[\d.]+)C__"
+    r"(?:(?P<filter_mid>[A-Za-z][\w ]*?)_)?"  # filter token may precede rot;
+    r"(?P<rot>-?[\d.]*)deg_"      # names like "O 3nm" contain a space.
+    r"(?P<temp>-?[\d.]+)C__"      # rot may be empty (no rotator): "..._deg_..."
     r"HFR(?P<hfr>[\d.]*)_"
     r"RMS(?P<rms>[\d.]*)_"
-    r"(?P<filter>\w*)_"
+    r"(?P<filter>[\w ]*?)_"
     r"(?P<idx>\d+)\.(?P<ext>fit|fits|xisf)$",
     re.IGNORECASE,
 )
@@ -122,8 +132,52 @@ ASIAIR_DSLR_CAL = re.compile(
     re.IGNORECASE,
 )
 
-PARSERS = (NINA_V2, NINA_LEGACY, ASIAIR_SCI, ASIAIR_CAL,
-           ASIAIR_DSLR_SCI, ASIAIR_DSLR_CAL)
+# 8) ASIAir science, rot-first — early-2026 firmware epoch put the rotator
+#    angle right after the target. Tried BEFORE plain ASIAIR_SCI so the
+#    target group stays clean instead of absorbing "..._321deg".
+ASIAIR_SCI_ROTFIRST = re.compile(
+    r"^(?P<type>Light)_"
+    r"(?P<target>.+?)_"
+    r"(?P<rot>-?[\d.]+)deg_"
+    r"(?P<exp>[\d.]+)(?P<unit>s|ms)_"
+    r"Bin(?P<bin>\d+)_"
+    r"(?P<cam>[^_]+)_"
+    r"gain(?P<gain>-?\d+)_"
+    r"(?P<dt>\d{8}-\d{6})_"
+    r"(?P<temp>-?[\d.]+)C"
+    r"(?:_(?P<filter>[A-Za-z][\w]*))?"
+    r"_(?P<idx>\d+)\.(?P<ext>fit|fits|xisf)$",
+    re.IGNORECASE,
+)
+
+# 9) ASIAir calibration, rot-first — same epoch, no target token.
+ASIAIR_CAL_ROTFIRST = re.compile(
+    r"^(?P<type>Flat|Dark|Bias|DarkFlat|Dark Flat)_"
+    r"(?P<rot>-?[\d.]+)deg_"
+    r"(?P<exp>[\d.]+)(?P<unit>s|ms)_"
+    r"Bin(?P<bin>\d+)_"
+    r"(?P<cam>[^_]+)_"
+    r"gain(?P<gain>-?\d+)_"
+    r"(?P<dt>\d{8}-\d{6})_"
+    r"(?P<temp>-?[\d.]+)C"
+    r"(?:_(?P<filter>[A-Za-z][\w]*))?"
+    r"_(?P<idx>\d+)\.(?P<ext>fit|fits|xisf)$",
+    re.IGNORECASE,
+)
+
+PARSERS = (NINA_V2, NINA_LEGACY, ASIAIR_SCI_ROTFIRST, ASIAIR_CAL_ROTFIRST,
+           ASIAIR_SCI, ASIAIR_CAL, ASIAIR_DSLR_SCI, ASIAIR_DSLR_CAL)
+
+# Deliberate captures that are not science or calibration frames: ASIAir
+# "Preview", NINA "SNAPSHOT" (framing/focus tests). parse() leaves them
+# unmatched; callers use is_non_science() to keep them out of unparsed-file
+# warnings without counting them as frames.
+NON_SCIENCE_PREFIXES = ("snapshot_", "preview_")
+
+
+def is_non_science(name):
+    """True for deliberate non-science captures (snapshots, previews)."""
+    return name.lower().startswith(NON_SCIENCE_PREFIXES)
 
 
 def parse(name):

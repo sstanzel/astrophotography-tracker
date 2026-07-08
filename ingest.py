@@ -36,7 +36,7 @@ OTHER_CAPTURE_FOLDERS = {
 SKIP_TOPLEVEL = {"_organization", "_Calibration Library", "_sessions to organize"}
 
 # Parser import — fits_parser.py lives in the same directory.
-from fits_parser import parse as parse_fits, frame_kind, safe   # noqa: E402
+from fits_parser import parse as parse_fits, frame_kind, safe, is_non_science   # noqa: E402
 
 SESSION_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9_+\-]+)\s+(?P<scope>\S+)\s+(?P<sensor>\S+)\s+(?P<date>\d{4}-\d{2}-\d{2})$"
@@ -574,8 +574,10 @@ def ingest_library(con, library_id, root, obs, locations, log):
             for abs_path, is_rej, m in walk_fits(spath):
                 if m is None:
                     # Count only raw-capture files that failed to parse — not
-                    # PixInsight processing output (debayered .xisf etc.).
-                    if not in_processing_area(abs_path, spath):
+                    # PixInsight processing output (debayered .xisf etc.) and
+                    # not deliberate non-science captures (snapshots/previews).
+                    if (not in_processing_area(abs_path, spath)
+                            and not is_non_science(os.path.basename(abs_path))):
                         unparsed += 1
                     continue
                 kind = frame_kind(m)              # light/flat/dark/bias/darkflat
@@ -1056,12 +1058,19 @@ def validate(con, locations, obs, log):
 
     # -------------------------------------------------------------- Tier 2 --
     # FITS-header cross-checks (one sampled light header per session).
+    # Registry names that legitimately differ from INSTRUME beyond vendor
+    # noise words (keys/values are norm_cam()-style: lowercase alphanumeric).
+    # Kept explicit — a substring match here would mask the truncated folder
+    # tokens ('ASI2600MC' vs the Pro/Air bodies) validation exists to catch.
+    INSTRUME_ALIASES = {"qhyminicam8m": "minicam8"}
+
     def norm_cam(s):
         # strip punctuation/case and the noise words manufacturers add to the
         # FITS INSTRUME string ("ZWO ...", "Canon EOS ...") so a compact folder
         # token like 'CanonR5' compares equal to INSTRUME 'Canon EOS R5'.
-        return (re.sub(r"[^a-z0-9]", "", (s or "").lower())
-                .replace("zwo", "").replace("eos", ""))
+        n = (re.sub(r"[^a-z0-9]", "", (s or "").lower())
+             .replace("zwo", "").replace("eos", ""))
+        return INSTRUME_ALIASES.get(n, n)
 
     for sid, fp, sensor, instr in cur.execute(
             "SELECT session_id, folder_path, sensor, fits_instrument "

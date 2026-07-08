@@ -30,7 +30,7 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import astro_config  # noqa: E402
 from ingest import SESSION_RE, parse_target_folder, walk_fits  # noqa: E402
-from fits_parser import frame_kind, safe, exposure_seconds  # noqa: E402
+from fits_parser import frame_kind, safe, exposure_seconds, is_non_science  # noqa: E402
 
 # Session date is the local civil evening; UTC frame stamps can roll past
 # midnight, so anything within one day of the folder date is normal.
@@ -148,7 +148,8 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
     for fpath, is_rej, fm in walk_fits(spath):
         fname = os.path.basename(fpath)
         if fm is None:
-            unparsed.append(fname)
+            if not is_non_science(fname):
+                unparsed.append(fname)
             continue
         kind = frame_kind(fm)
         kinds[kind] += 1
