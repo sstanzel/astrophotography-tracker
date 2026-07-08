@@ -38,6 +38,13 @@ MAX_FRAME_DATE_SKEW_DAYS = 1
 
 STAGING_DIRNAME = "_sessions to organize"
 
+# Second-rig sessions shot on a field NEXT TO the target carry this suffix
+# (e.g. "M_12_adjacent Redcat51 minicam8 2026-07-06") until both scopes are
+# co-aligned on the mount. They file under the BASE target's folder: ingest
+# keys sessions to the parent target folder, and a separate "M 12 adjacent"
+# folder would parse to target_id M_12 and collide with the real target.
+ADJACENT_SUFFIX = "_adjacent"
+
 
 def registry_names(subfolder: str) -> set[str]:
     """Return the controlled-vocabulary names under an _organization folder.
@@ -107,11 +114,17 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
         return errors, warnings, infos
 
     # -- destination target folder ------------------------------------------
-    tfolder = targets.get(target_tok)
+    # Adjacent-field sessions resolve to the BASE target's folder (see
+    # ADJACENT_SUFFIX note above).
+    lookup_tok = target_tok
+    if target_tok.lower().endswith(ADJACENT_SUFFIX):
+        lookup_tok = target_tok[:-len(ADJACENT_SUFFIX)]
+    tfolder = targets.get(lookup_tok)
     if tfolder is None:
-        errors.append(f"no target folder in library matches target token {target_tok!r}")
+        errors.append(f"no target folder in library matches target token {lookup_tok!r}")
     else:
-        infos.append(f"destination: {tfolder}/")
+        suffix_note = " (adjacent-field session -> base target)" if lookup_tok != target_tok else ""
+        infos.append(f"destination: {tfolder}/{suffix_note}")
         if os.path.isdir(os.path.join(library_root, tfolder, sname)):
             errors.append(f"collision: {tfolder}/{sname} already exists in the library")
 
