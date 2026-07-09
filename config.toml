@@ -37,3 +37,8 @@ id    = "peak"
 path  = "/Volumes/peak/Pictures/Astrophotography/Astrophotography Library"
 label = "Peak (lifetime archive on Synology)"
 role  = "archive"
+
+# Optional offline mirror. refresh.py copies the generated dashboard + xlsx here
+# (available when Stream/Peak are dismounted). Remove this block to skip mirroring.
+[mirror]
+path = "/Users/stevestanzel/Library/CloudStorage/OneDrive-Personal/Hobbies/Astrophotography"

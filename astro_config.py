@@ -87,6 +87,38 @@ def load_libraries(config_path=None):
     return libs
 
 
+def mirror_path(config_path=None):
+    """Return the offline-mirror directory from config.toml's [mirror] path.
+
+    The [mirror] section is optional; refresh.py copies the dashboard + xlsx
+    there (e.g. a OneDrive folder) so they are available when the libraries are
+    dismounted.
+
+    Args:
+        config_path: path to config.toml (defaults to the one next to the scripts).
+
+    Returns:
+        The mirror directory path, or None if no [mirror] path is configured.
+    """
+    path = config_path or DEFAULT_CONFIG
+    if not os.path.exists(path):
+        return None
+    in_mirror = False
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("["):
+                in_mirror = line == "[mirror]"
+                continue
+            if in_mirror:
+                m = re.match(r'path\s*=\s*"(.*?)"', line)
+                if m:
+                    return m.group(1)
+    return None
+
+
 if __name__ == "__main__":
     # Quick self-check: print the resolved configuration.
     print(f"SCRIPT_DIR : {SCRIPT_DIR}")
