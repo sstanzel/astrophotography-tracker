@@ -9,15 +9,15 @@ safe to clear. This script empties their *contents* but leaves the (now empty)
 folders in place, since they are part of the PostHaste session template.
 
 SAFE BY DEFAULT: a plain run only previews. Nothing is deleted until you pass
---apply. And as a safety net, if a PI Process folder still contains a
-'Stacked_*' file, that whole folder is skipped and reported — move the stack to
-the Results folder first.
+--apply. And as a safety net, any container whose integrated master is not yet
+in its "{name} Results" folder is SKIPPED and reported — run promote_masters.py
+first, or pass --promote to copy the master to Results before cleaning.
 
 Run natively on the Mac:
-    python3 "clean_processing.py"               # preview (dry run)
-    python3 "clean_processing.py" --apply        # actually empty the folders
-    python3 "clean_processing.py" --only "M_81"  # limit to matching session folders
-    python3 "clean_processing.py" --apply --only "SH2_216"
+    python3 "clean_processing.py"                # preview (dry run)
+    python3 "clean_processing.py" --apply         # empty the folders
+    python3 "clean_processing.py" --promote --apply   # copy master→Results, then empty
+    python3 "clean_processing.py" --only "M_81"   # limit to matching folders
 """
 from __future__ import annotations
 import argparse, os, shutil, sys
@@ -28,6 +28,7 @@ import argparse, os, shutil, sys
 # Library paths come from config.toml (via astro_config) — not hardcoded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import astro_config   # noqa: E402
+from promote_masters import find_masters, results_dir_for   # noqa: E402
 
 WORKING_FOLDERS = ("PI Process", "PI Magic")   # folders whose contents get cleared
 SKIP_TOPLEVEL = {"_organization", "_Calibration Library", "_sessions to organize"}
@@ -54,14 +55,24 @@ def tree_size(path):
     return fc, sz
 
 
-def has_stacked_file(path):
-    """True if any 'Stacked_*' file lives under path — a keeper that must not
-    be deleted. Safety net in case one was not moved to Results first."""
-    for root, _dirs, files in os.walk(path):
-        for f in files:
-            if f.lower().startswith("stacked"):
-                return os.path.join(root, f)
-    return None
+def unpromoted_masters(container):
+    """Return integrated masters in a container's working folders not yet in Results.
+
+    The keeper master must reach the "{name} Results" folder before the working
+    folders (PI Process / PI Magic) are emptied. Any master still only in the
+    working folders is returned so the caller can gate or promote it.
+
+    Args:
+        container: absolute path of the session or integration folder.
+
+    Returns:
+        List of master file paths under the working folders whose basename is
+        not already present in the Results folder.
+    """
+    rdir = results_dir_for(container)
+    present = set(os.listdir(rdir)) if os.path.isdir(rdir) else set()
+    return [m for m in find_masters(container)
+            if os.path.basename(m) not in present]
 
 
 def report_prunable_integrations():
@@ -118,6 +129,9 @@ def main():
                     help="actually delete (default is a preview only)")
     ap.add_argument("--only", default="",
                     help="limit to session folders containing this substring")
+    ap.add_argument("--promote", action="store_true",
+                    help="copy any master not yet in Results into Results first, "
+                         "instead of skipping that folder")
     ap.add_argument("--config", default=None,
                     help="path to config.toml (default: next to this script)")
     args = ap.parse_args()
@@ -125,7 +139,8 @@ def main():
     libraries = astro_config.load_libraries(args.config)
     lib_paths = [L["path"] for L in libraries]
     targets = []      # (working_folder_path, file_count, bytes)
-    skipped = []      # (working_folder_path, reason)
+    skipped = []      # (working_folder_path, a master still only in working)
+    promoted = []     # (master_src, results_dir) copied to Results first
 
     for lib in libraries:
         libroot = lib["path"]
@@ -154,6 +169,24 @@ def main():
             for pname, ppath in parents:
                 if args.only and args.only not in pname:
                     continue
+                # Gate: the integrated master must be in Results before the
+                # working folders are emptied. If it is not, either promote it
+                # (--promote) or skip this whole container.
+                pending = unpromoted_masters(ppath)
+                if pending and not args.promote:
+                    for wf in WORKING_FOLDERS:
+                        wpath = os.path.join(ppath, wf)
+                        if os.path.isdir(wpath) and tree_size(wpath)[0] > 0:
+                            skipped.append((wpath, pending[0]))
+                    continue
+                if pending and args.promote:
+                    rdir = results_dir_for(ppath)
+                    for m in pending:
+                        dst = os.path.join(rdir, os.path.basename(m))
+                        if args.apply:
+                            os.makedirs(rdir, exist_ok=True)
+                            shutil.copy2(m, dst)
+                        promoted.append((m, rdir))
                 for wf in WORKING_FOLDERS:
                     wpath = os.path.join(ppath, wf)
                     if not os.path.isdir(wpath):
@@ -161,12 +194,7 @@ def main():
                     fc, sz = tree_size(wpath)
                     if fc == 0:
                         continue                      # already empty
-                    stacked = (has_stacked_file(wpath)
-                               if wf == "PI Process" else None)
-                    if stacked:
-                        skipped.append((wpath, stacked))
-                    else:
-                        targets.append((wpath, fc, sz))
+                    targets.append((wpath, fc, sz))
 
     # ---- report ----
     total_files = sum(t[1] for t in targets)
@@ -182,12 +210,18 @@ def main():
                 rel = wpath[len(lp) + 1:]
         print(f"  {fc:5} files  {human(sz):>9}   {rel}")
 
+    if promoted:
+        tag = "promoted" if args.apply else "would promote"
+        print(f"\n  MASTER → Results ({tag} before cleaning):")
+        for src, rdir in promoted:
+            print(f"    {os.path.basename(src)}  →  {rdir}")
+
     if skipped:
-        print(f"\n  SKIPPED — a Stacked_* keeper is still inside (move it to the "
-              f"Results folder first):")
-        for wpath, stacked in skipped:
+        print(f"\n  SKIPPED — the integrated master is not in Results yet "
+              f"(run promote_masters.py, or re-run with --promote):")
+        for wpath, master in skipped:
             print(f"    {wpath}")
-            print(f"      contains: {os.path.basename(stacked)}")
+            print(f"      master still only in working: {os.path.basename(master)}")
 
     # ---- prunable multi-session integrations (read-only report) ----
     report_prunable_integrations()
@@ -208,8 +242,10 @@ def main():
             print(f"  ! could not empty {wpath}: {e}")
     print(f"Done — emptied {removed_folders} folder(s), "
           f"removed {removed_files} files, reclaimed {human(total_bytes)}.")
+    if promoted:
+        print(f"Promoted {len(promoted)} master(s) to Results first.")
     if skipped:
-        print(f"{len(skipped)} folder(s) skipped (Stacked_* keeper inside).")
+        print(f"{len(skipped)} folder(s) skipped (master not in Results).")
 
 
 if __name__ == "__main__":
