@@ -182,8 +182,65 @@ def read_notes_toml(session_path, session_name):
     return out
 
 
+def span_matches(date, span):
+    """True if a YYYY-MM-DD date falls in a span: None/'all', a year, or a range.
+
+    Args:
+        date: 'YYYY-MM-DD' capture date.
+        span: 'all'/None, a year '2026', or a range '2024-2026'.
+
+    Returns:
+        Whether the date's year is covered by the span.
+    """
+    if not span or span == "all":
+        return True
+    year = date[:4]
+    m = re.fullmatch(r"(\d{4})-(\d{4})", span)
+    if m:
+        return m.group(1) <= year <= m.group(2)
+    return year == span
+
+
+def resolve_auto_members(target_path, rig, span, exclude):
+    """Return session folder names under a target that match a rig+span rule.
+
+    Args:
+        target_path: absolute path of the target folder.
+        rig: '<scope> <sensor>' to require one rig, or falsy for any rig (composite).
+        span: span filter passed to span_matches().
+        exclude: iterable of session folder names to drop.
+
+    Returns:
+        Sorted list of matching session folder names.
+    """
+    excl = set(exclude or [])
+    scope_want = sensor_want = None
+    if rig:
+        parts = rig.split()
+        if len(parts) >= 2:
+            scope_want, sensor_want = parts[0], parts[1]
+    out = []
+    for sname in sorted(os.listdir(target_path)):
+        if sname == "integrations" or sname.startswith((".", "_")):
+            continue
+        if not os.path.isdir(os.path.join(target_path, sname)):
+            continue
+        m = SESSION_RE.match(sname)
+        if not m or not span_matches(m.group("date"), span) or sname in excl:
+            continue
+        if scope_want and (m.group("scope") != scope_want
+                           or m.group("sensor") != sensor_want):
+            continue
+        out.append(sname)
+    return out
+
+
 def read_integration_toml(path):
-    """Parse an integration.toml manifest. Returns a dict, or None if absent."""
+    """Parse an integration.toml manifest. Returns a dict, or None if absent.
+
+    Handles the rule-based format ([membership] rig/span + [built] sessions) and
+    the legacy explicit-members format (top-level `members` list). The parse is a
+    flat, section-agnostic regex — keys are matched wherever they appear."""
     if not os.path.isfile(path):
         return None
     try:
@@ -199,19 +256,30 @@ def read_integration_toml(path):
         m = re.search(r'^\s*' + key + r'\s*=\s*(\d+)', txt, re.M)
         return int(m.group(1)) if m else None
 
+    def flt(key):
+        m = re.search(r'^\s*' + key + r'\s*=\s*([\d.]+)', txt, re.M)
+        return float(m.group(1)) if m else None
+
     def b(key):
         m = re.search(r'^\s*' + key + r'\s*=\s*(true|false)', txt, re.M | re.I)
         return bool(m) and m.group(1).lower() == "true"
 
-    members = []
-    am = re.search(r'members\s*=\s*\[(.*?)\]', txt, re.S)
-    if am:
-        members = re.findall(r'"([^"]*)"', am.group(1))
+    def arr(key):
+        m = re.search(r'(?ms)^\s*' + key + r'\s*=\s*\[(.*?)\]', txt)
+        return re.findall(r'"([^"]*)"', m.group(1)) if m else []
+
+    mode = s("mode")
     return {
+        "mode": mode if mode in ("auto", "pinned") else None,
+        "rig": s("rig"),
+        "span": s("span"),
+        "goal_hours": flt("goal_hours"),
+        "exclude": arr("exclude"),
+        "members": arr("members"),           # legacy explicit list
+        "built_sessions": arr("sessions"),   # [built].sessions
+        "built_machine": s("built_machine"),
         "kind": s("kind"),
         "version": i("version") or 1,
-        "span": s("span"),
-        "members": members,
         "edited": b("edited"),
         "published": b("published"),
         "printed": b("printed"),
@@ -263,6 +331,14 @@ SESSION_NEW_COLS = [
     ("pi_magic_studio",     "INTEGER DEFAULT 0"),   # 1 if run in PI Magic Studio
     ("pi_magic_machine",    "TEXT"),                # which PC ran it
     ("pi_magic_date",       "TEXT"),                # YYYY-MM-DD (optional)
+]
+
+# Columns added to the integrations table on an existing DB (no-op on a fresh
+# one). The CHECK on membership_mode lives in schema.sql for new DBs only.
+INTEGRATION_NEW_COLS = [
+    ("membership_mode", "TEXT NOT NULL DEFAULT 'auto'"),
+    ("goal_hours",      "REAL"),
+    ("built_machine",   "TEXT"),
 ]
 
 # frames table rebuild — used by apply_migrations when an old DB's grammar CHECK
@@ -378,8 +454,8 @@ def apply_migrations(con):
     if frow and "asiair_dslr" not in frow[0]:
         cur.executescript(FRAMES_TABLE_REBUILD)
 
-    # Integrations layer (tables + views). Views are dropped and recreated so an
-    # existing DB picks up the new per-session-stage v_session_pipeline.
+    # Integrations layer. Create tables (fresh DBs), migrate columns in place
+    # (existing DBs), then (re)create the views so they pick up new columns.
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS integrations (
             integration_id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -393,6 +469,9 @@ def apply_migrations(con):
             span             TEXT,
             version          INTEGER NOT NULL DEFAULT 1,
             session_count    INTEGER NOT NULL DEFAULT 0,
+            membership_mode  TEXT NOT NULL DEFAULT 'auto',
+            goal_hours       REAL,
+            built_machine    TEXT,
             stage_integrate  INTEGER NOT NULL DEFAULT 2,
             stage_edit       INTEGER NOT NULL DEFAULT 0,
             stage_publish    INTEGER NOT NULL DEFAULT 0,
@@ -409,9 +488,21 @@ def apply_migrations(con):
         CREATE TABLE IF NOT EXISTS integration_members (
             integration_id INTEGER NOT NULL REFERENCES integrations(integration_id) ON DELETE CASCADE,
             session_id     INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+            in_build       INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (integration_id, session_id)
         );
+    """)
+    # In-place column adds for a pre-existing integrations table / members table.
+    icols = {r[1] for r in cur.execute("PRAGMA table_info(integrations)")}
+    for col, decl in INTEGRATION_NEW_COLS:
+        if col not in icols:
+            cur.execute(f"ALTER TABLE integrations ADD COLUMN {col} {decl}")
+    imcols = {r[1] for r in cur.execute("PRAGMA table_info(integration_members)")}
+    if "in_build" not in imcols:
+        cur.execute("ALTER TABLE integration_members "
+                    "ADD COLUMN in_build INTEGER NOT NULL DEFAULT 0")
 
+    cur.executescript("""
         DROP VIEW IF EXISTS v_session_pipeline;
         CREATE VIEW v_session_pipeline AS
         SELECT
@@ -436,14 +527,26 @@ def apply_migrations(con):
         SELECT
             i.integration_id, i.target_id, t.common_name,
             i.kind, i.folder_name, i.scope, i.sensor, i.span, i.version,
-            i.session_count, i.library_id,
+            i.library_id, i.membership_mode, i.goal_hours, i.built_machine,
+            COUNT(im.session_id)                                    AS sessions_available,
+            SUM(COALESCE(im.in_build, 0))                           AS sessions_built,
+            ROUND(SUM(s.integration_s) / 3600.0, 2)                AS available_hours,
+            ROUND(SUM(CASE WHEN im.in_build = 1 THEN s.integration_s ELSE 0 END) / 3600.0, 2)
+                                                                    AS built_hours,
+            MAX(CASE WHEN im.in_build = 1 THEN s.session_date END)  AS data_through,
+            CASE WHEN SUM(CASE WHEN im.in_build = 1 THEN 0 ELSE 1 END) > 0 THEN 1 ELSE 0 END
+                                                                    AS is_stale,
             CASE
               WHEN i.stage_print   = 2 THEN '7 Printed'
               WHEN i.stage_publish = 2 THEN '6 Published'
               WHEN i.stage_edit    = 2 THEN '5 Edited'
               ELSE '4 Integrated'
             END AS furthest_stage
-        FROM integrations i JOIN targets t USING (target_id);
+        FROM integrations i
+        JOIN targets t USING (target_id)
+        LEFT JOIN integration_members im ON im.integration_id = i.integration_id
+        LEFT JOIN sessions s             ON s.session_id = im.session_id
+        GROUP BY i.integration_id;
 
         DROP VIEW IF EXISTS v_targets_unpublished;
         CREATE VIEW v_targets_unpublished AS
@@ -838,11 +941,21 @@ def ingest_calibration(con, library_id, root, obs, log):
 def ingest_integrations(con, library_id, root, obs, log):
     """Walk each target's integrations/ folder into the integrations table.
 
-    Each subfolder of {target}/integrations/ should hold an integration.toml.
-    Member session names are resolved to session_id rows; scope/sensor and the
-    multi-session-vs-composite kind are derived from the members."""
+    Each subfolder of {target}/integrations/ holds an integration.toml. Members
+    are resolved two ways: the AVAILABLE set (mode 'auto' → rig+span rule;
+    'pinned'/legacy → the explicit `members` list) and the BUILT set (the
+    [built].sessions actually stacked). Each available (or built) session becomes
+    an integration_members row; in_build marks the built ones. scope/sensor and
+    the multi-session-vs-composite kind are derived from the available rigs."""
     cur = con.cursor()
     n = 0
+
+    def resolve(sname):
+        """Resolve a session folder name to (session_id, scope, sensor) or None."""
+        return cur.execute(
+            "SELECT session_id, scope, sensor FROM sessions WHERE folder_path = ?",
+            (os.path.join(tname, sname),)).fetchone()
+
     for tname in sorted(os.listdir(root)):
         tpath = os.path.join(root, tname)
         if (tname.startswith((".", "_")) or tname in SKIP_TOPLEVEL
@@ -862,22 +975,46 @@ def ingest_integrations(con, library_id, root, obs, log):
                 obs["integration_no_manifest"].append(rel)
                 continue
 
-            # Resolve member session names to rows under this target.
-            member_ids, missing, rigs = [], [], set()
-            for msname in man["members"]:
-                row = cur.execute(
-                    "SELECT session_id, scope, sensor FROM sessions "
-                    "WHERE folder_path = ?",
-                    (os.path.join(tname, msname),)).fetchone()
-                if row:
-                    member_ids.append(row[0])
+            # Effective membership mode: explicit, else legacy list ⇒ pinned.
+            if man["mode"] in ("auto", "pinned"):
+                mode = man["mode"]
+            elif man["members"]:
+                mode = "pinned"
+            else:
+                mode = "auto"
+
+            # AVAILABLE member names (what the integration should contain).
+            if mode == "pinned":
+                avail_names = man["members"] or man["built_sessions"]
+            else:
+                avail_names = resolve_auto_members(
+                    tpath, man["rig"], man["span"], man["exclude"])
+
+            # BUILT member names (what is actually in the current master).
+            if man["built_sessions"]:
+                built_names = set(man["built_sessions"])
+            elif mode == "pinned":
+                built_names = set(avail_names)   # legacy list = the stack
+            else:
+                built_names = set()              # auto, not yet stacked
+
+            # Resolve the union to session rows; track rigs of the AVAILABLE set.
+            member_rows, missing, rigs = {}, [], set()
+            for sname in dict.fromkeys(list(avail_names) + list(built_names)):
+                row = resolve(sname)
+                if not row:
+                    missing.append(sname)
+                    continue
+                member_rows[row[0]] = sname
+                if sname in avail_names:
                     rigs.add((row[1], row[2]))
-                else:
-                    missing.append(msname)
             if missing:
                 obs["integration_missing_member"].append((rel, missing))
+            avail_set = set(avail_names)
+            built_id_flags = {sid: (1 if sname in built_names else 0)
+                              for sid, sname in member_rows.items()}
 
-            # Derive scope/sensor and kind from the members.
+            # Derive scope/sensor and kind from the available members' rigs.
             if len(rigs) == 1:
                 scope, sensor = next(iter(rigs))
                 derived_kind = "multi-session"
@@ -887,7 +1024,6 @@ def ingest_integrations(con, library_id, root, obs, log):
             if man["kind"] and man["kind"] != derived_kind:
                 obs["integration_kind_mismatch"].append(
                     (rel, man["kind"], derived_kind))
-            kind = derived_kind
 
             # Results-folder file count for this integration.
             rfiles = 0
@@ -897,31 +1033,37 @@ def ingest_integrations(con, library_id, root, obs, log):
                     rfiles += sum(1 for x in _f
                                   if x != ".DS_Store" and not x.startswith("._"))
 
+            sessions_available = sum(1 for s in member_rows.values() if s in avail_set)
             cur.execute("""
                 INSERT INTO integrations(target_id, library_id, kind, folder_name,
                     folder_path, scope, sensor, span, version, session_count,
+                    membership_mode, goal_hours, built_machine,
                     stage_integrate, stage_edit, stage_publish, stage_print,
                     results_file_count, astrobin_url)
-                VALUES(?,?,?,?,?,?,?,?,?,?,2,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,2,?,?,?,?,?)
                 ON CONFLICT(folder_path) DO UPDATE SET
                   library_id=excluded.library_id, kind=excluded.kind,
                   folder_name=excluded.folder_name, scope=excluded.scope,
                   sensor=excluded.sensor, span=excluded.span,
                   version=excluded.version, session_count=excluded.session_count,
+                  membership_mode=excluded.membership_mode,
+                  goal_hours=excluded.goal_hours, built_machine=excluded.built_machine,
                   stage_edit=excluded.stage_edit, stage_publish=excluded.stage_publish,
                   stage_print=excluded.stage_print,
                   results_file_count=excluded.results_file_count,
                   astrobin_url=excluded.astrobin_url, updated_at=CURRENT_TIMESTAMP
-            """, (tp["target_id"], library_id, kind, iname, rel, scope, sensor,
-                  man["span"], man["version"], len(member_ids),
+            """, (tp["target_id"], library_id, derived_kind, iname, rel, scope, sensor,
+                  man["span"], man["version"], sessions_available,
+                  mode, man["goal_hours"], man["built_machine"],
                   2 if man["edited"] else 0, 2 if man["published"] else 0,
                   2 if man["printed"] else 0, rfiles, man["astrobin_url"]))
             iid = cur.execute("SELECT integration_id FROM integrations "
                               "WHERE folder_path=?", (rel,)).fetchone()[0]
             cur.execute("DELETE FROM integration_members WHERE integration_id=?", (iid,))
-            for sid in member_ids:
+            for sid, in_build in built_id_flags.items():
                 cur.execute("INSERT OR IGNORE INTO integration_members"
-                            "(integration_id, session_id) VALUES(?,?)", (iid, sid))
+                            "(integration_id, session_id, in_build) VALUES(?,?,?)",
+                            (iid, sid, in_build))
             n += 1
     con.commit()
     log(f"  {library_id}: {n} integrations")

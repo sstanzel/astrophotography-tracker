@@ -174,7 +174,12 @@ CREATE TABLE integrations (
     sensor           TEXT,                     -- single rig; NULL for a composite
     span             TEXT,                     -- '2026' | '2024-2026' | 'all' | ...
     version          INTEGER NOT NULL DEFAULT 1,
-    session_count    INTEGER NOT NULL DEFAULT 0,   -- denormalised member count
+    session_count    INTEGER NOT NULL DEFAULT 0,   -- denormalised AVAILABLE member count
+    -- membership rule (integration.toml [membership]). 'auto' = members resolved
+    -- from rig+span each ingest; 'pinned' = an explicit frozen list.
+    membership_mode  TEXT NOT NULL DEFAULT 'auto' CHECK (membership_mode IN ('auto','pinned')),
+    goal_hours       REAL,                     -- optional integration-hours goal (the "quest")
+    built_machine    TEXT,                     -- which PC produced the current master ([built])
     -- pipeline stages 4-7 for this integration. 0=not started,1=in progress,2=done.
     -- stage_integrate is 1+ by definition (the folder exists); 4 is implicit.
     stage_integrate  INTEGER NOT NULL DEFAULT 2,
@@ -192,10 +197,15 @@ CREATE TABLE integrations (
 CREATE INDEX idx_integrations_target ON integrations(target_id);
 CREATE INDEX idx_integrations_kind   ON integrations(kind);
 
--- Which sessions feed an integration (the integration.toml `members` list).
+-- Which sessions belong to an integration. Every AVAILABLE member (resolved
+-- from the rule, or the pinned list) gets a row; in_build = 1 marks the ones
+-- actually stacked into the current master (integration.toml [built].sessions).
+-- available_hours sums all members; built_hours sums in_build=1; the gap is the
+-- "stale" signal (captured but not yet folded into the master).
 CREATE TABLE integration_members (
     integration_id   INTEGER NOT NULL REFERENCES integrations(integration_id) ON DELETE CASCADE,
     session_id       INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    in_build         INTEGER NOT NULL DEFAULT 0,   -- 1 if in the current stacked master
     PRIMARY KEY (integration_id, session_id)
 );
 
@@ -488,14 +498,26 @@ CREATE VIEW v_integration_overview AS
 SELECT
     i.integration_id, i.target_id, t.common_name,
     i.kind, i.folder_name, i.scope, i.sensor, i.span, i.version,
-    i.session_count, i.library_id,
+    i.library_id, i.membership_mode, i.goal_hours, i.built_machine,
+    COUNT(im.session_id)                                       AS sessions_available,
+    SUM(COALESCE(im.in_build, 0))                              AS sessions_built,
+    ROUND(SUM(s.integration_s) / 3600.0, 2)                   AS available_hours,
+    ROUND(SUM(CASE WHEN im.in_build = 1 THEN s.integration_s ELSE 0 END) / 3600.0, 2)
+                                                               AS built_hours,
+    MAX(CASE WHEN im.in_build = 1 THEN s.session_date END)     AS data_through,
+    CASE WHEN SUM(CASE WHEN im.in_build = 1 THEN 0 ELSE 1 END) > 0 THEN 1 ELSE 0 END
+                                                               AS is_stale,
     CASE
       WHEN i.stage_print   = 2 THEN '7 Printed'
       WHEN i.stage_publish = 2 THEN '6 Published'
       WHEN i.stage_edit    = 2 THEN '5 Edited'
       ELSE '4 Integrated'
     END AS furthest_stage
-FROM integrations i JOIN targets t USING (target_id);
+FROM integrations i
+JOIN targets t USING (target_id)
+LEFT JOIN integration_members im ON im.integration_id = i.integration_id
+LEFT JOIN sessions s             ON s.session_id = im.session_id
+GROUP BY i.integration_id;
 
 -- Targets with nothing published yet — no published session AND no published
 -- integration. The "what still needs sharing" list.

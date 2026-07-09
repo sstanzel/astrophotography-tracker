@@ -120,9 +120,20 @@ def main():
         data["integrations"] = rows("""
             SELECT common_name, target_id, kind, folder_name,
                    COALESCE(scope || ' ' || sensor, 'composite') AS rig,
-                   span, version, session_count, furthest_stage
+                   span,
+                   COALESCE(built_hours, 0)     AS built_hours,
+                   COALESCE(available_hours, 0) AS available_hours,
+                   goal_hours,
+                   CASE WHEN goal_hours > 0
+                        THEN MIN(100, ROUND(100.0 * available_hours / goal_hours))
+                        END AS goal_pct,
+                   sessions_built, sessions_available,
+                   data_through,
+                   COALESCE(built_machine, '') AS machine,
+                   is_stale,
+                   furthest_stage
             FROM v_integration_overview
-            ORDER BY target_id, version""")
+            ORDER BY target_id, folder_name""")
         data["prune"] = rows("""
             SELECT target_id, span, version_count, latest_version
             FROM v_integration_prune ORDER BY target_id""")
@@ -349,13 +360,30 @@ countTable("sessionPipeline", D.sessionPipeline);
       `lineage(s) have multiple versions — prune candidates (keep the latest).</div>`
     : "";
   el.innerHTML = head +
-    "<table><thead><tr><th>Target</th><th>Kind</th><th>Rig</th><th>Span</th>"+
-    "<th>Ver</th><th>Sessions</th><th>Stage</th></tr></thead><tbody>" +
-    rows.map(r=>`<tr><td>${r.common_name||r.target_id}</td>`+
-      `<td>${r.kind}</td><td>${r.rig}</td><td>${r.span||""}</td>`+
-      `<td class="num">${r.version}</td>`+
-      `<td class="num">${r.session_count}</td>`+
-      `<td>${r.furthest_stage}</td></tr>`).join("") + "</tbody></table>";
+    "<table><thead><tr><th>Target</th><th>Rig</th><th>Span</th>"+
+    "<th>Built hrs</th><th>Available</th><th>Goal</th><th>Progress</th>"+
+    "<th>Data through</th><th>Machine</th><th>State</th><th>Stage</th>"+
+    "</tr></thead><tbody>" +
+    rows.map(r=>{
+      const pct = r.goal_pct;
+      const prog = (r.goal_hours>0)
+        ? `<div class="bar"><span style="width:${pct}%"></span></div> ${pct}%`
+        : "";
+      const state = r.is_stale
+        ? `<span class="pill warn">⚠ ${r.sessions_available-r.sessions_built} new `+
+          `(${(r.available_hours-r.built_hours).toFixed(1)} h)</span>`
+        : `<span class="pill good">✓ current</span>`;
+      return `<tr><td>${r.common_name||r.target_id}</td>`+
+      `<td>${r.rig}</td><td>${r.span||""}</td>`+
+      `<td class="num">${r.built_hours.toFixed(1)}</td>`+
+      `<td class="num">${r.available_hours.toFixed(1)}</td>`+
+      `<td class="num">${r.goal_hours??""}</td>`+
+      `<td>${prog}</td>`+
+      `<td>${r.data_through||""}</td>`+
+      `<td>${r.machine}</td>`+
+      `<td>${state}</td>`+
+      `<td>${r.furthest_stage}</td></tr>`;
+    }).join("") + "</tbody></table>";
 })();
 
 // ---- progress bars ----

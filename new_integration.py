@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-new_integration.py - scaffold a multi-session (or composite) integration folder.
+new_integration.py - scaffold a living multi-session (or composite) integration.
 
-Creates  {target}/integrations/{target_id} {span} v{N}/  containing empty
-PI Process/, PI Magic/ and a Results/ folder, plus a filled-in integration.toml
-whose member-session list is selected for you from the target's session folders.
+Creates  {target}/integrations/{target_id} {rig|composite} {span}/  containing
+empty PI Process/, PI Magic/ and Results/ folders, plus an integration.toml with
+a rule-based [membership] section. The tracker resolves the member sessions from
+that rule (rig + span) on every ingest, so the integration grows automatically as
+you add nights — no member list to maintain and no version churn.
 
-Dry run by default — it shows which sessions it would include; pass --apply to
-actually create the folder.
+Dry run by default — it previews the sessions the rule matches today; pass
+--apply to actually create the folder.
 
-    python3 new_integration.py --target "M 81 Bodes Galaxy" --span 2026
-    python3 new_integration.py --target "M 81 Bodes Galaxy" --span 2026 \\
-        --rig "RASA8 ASI2600MCAir" --version 2 --apply
+    python3 new_integration.py --target "M 81 Bodes Galaxy" \\
+        --rig "RASA8 ASI2600MCAir" --span all --goal 50 --apply
+    python3 new_integration.py --target "M 81 Bodes Galaxy" --span 2026     # composite
     python3 new_integration.py --target "M 81 Bodes Galaxy" --span all --apply
 
-Then do the integration in PixInsight inside that folder and re-run ingest.py.
+Then build the integration in PixInsight / PI Magic Studio inside that folder,
+run mark_integrated.py to record what you stacked, and re-run ingest.py.
 """
 import argparse
 import os
@@ -49,84 +52,68 @@ def span_matches(date, span):
     return year == span
 
 
-def main():
-    ap = argparse.ArgumentParser(
-        description="Scaffold a multi-session integration folder + manifest.")
-    ap.add_argument("--target", required=True,
-                    help="target folder name, e.g. 'M 81 Bodes Galaxy'")
-    ap.add_argument("--span", required=True,
-                    help="'2026' | a range like '2024-2026' | 'all'")
-    ap.add_argument("--version", type=int, default=1, help="integration version (default 1)")
-    ap.add_argument("--rig", default="",
-                    help="limit members to one rig, e.g. 'RASA8 ASI2600MCAir'")
-    ap.add_argument("--apply", action="store_true",
-                    help="actually create the folder (default: preview only)")
-    ap.add_argument("--config", default=None,
-                    help="path to config.toml (default: next to this script)")
-    args = ap.parse_args()
+def select_members(target_path, span, rig):
+    """Return (members, rigs) matching the span (and rig, if given).
 
-    libraries = astro_config.load_libraries(args.config)
-    tpath = find_target(args.target, libraries)
-    if not tpath:
-        sys.exit(f"Target folder not found in any configured library: {args.target}")
+    Args:
+        target_path: absolute path of the target folder.
+        span: '2026' | a range | 'all'.
+        rig: '<scope> <sensor>' to require one rig, or '' for any (composite).
 
-    # Select member sessions from the target's session folders.
+    Returns:
+        (sorted member folder names, set of '<scope> <sensor>' rigs seen).
+    """
     members, rigs = [], set()
-    for sname in sorted(os.listdir(tpath)):
+    for sname in sorted(os.listdir(target_path)):
         if sname == "integrations" or sname.startswith((".", "_")):
             continue
-        if not os.path.isdir(os.path.join(tpath, sname)):
+        if not os.path.isdir(os.path.join(target_path, sname)):
             continue
         m = SESSION_RE.match(sname)
-        if not m or not span_matches(m.group("date"), args.span):
+        if not m or not span_matches(m.group("date"), span):
             continue
-        rig = f"{m.group('scope')} {m.group('sensor')}"
-        if args.rig and rig != args.rig:
+        this_rig = f"{m.group('scope')} {m.group('sensor')}"
+        if rig and this_rig != rig:
             continue
         members.append(sname)
-        rigs.add(rig)
+        rigs.add(this_rig)
+    return members, rigs
 
-    if not members:
-        sys.exit(f"No sessions matched span '{args.span}'"
-                 + (f" / rig '{args.rig}'" if args.rig else "")
-                 + f" under {args.target}.")
 
-    target_id = SESSION_RE.match(members[0]).group("target")
-    kind = "multi-session" if len(rigs) == 1 else "composite"
-    folder = f"{target_id} {args.span} v{args.version}"
-    dest = os.path.join(tpath, "integrations", folder)
+def build_manifest(rig, span, goal_hours):
+    """Render a rule-based integration.toml for a living integration.
 
-    print(f"Target      : {args.target}")
-    print(f"Integration : {folder}   ({kind}, {len(rigs)} rig(s))")
-    print(f"Members ({len(members)}):")
-    for ms in members:
-        print(f"  {ms}")
+    Args:
+        rig: '<scope> <sensor>' or '' for a composite.
+        span: the span string.
+        goal_hours: optional integration-hours goal, or None.
 
-    if os.path.exists(dest):
-        sys.exit(f"\nERROR: integration folder already exists:\n  {dest}")
-
-    if not args.apply:
-        print(f"\nDRY RUN — nothing created. Re-run with --apply to create:\n"
-              f"  integrations/{folder}/"
-              f"  (PI Process/, PI Magic/, '{folder} Results/', integration.toml)")
-        return
-
-    os.makedirs(os.path.join(dest, "PI Process"))
-    os.makedirs(os.path.join(dest, "PI Magic"))
-    os.makedirs(os.path.join(dest, f"{folder} Results"))
-
+    Returns:
+        The manifest file contents.
+    """
     lines = [
         "# Integration manifest — see _organization/[template] integration.toml",
         "# for the documented format. Generated by new_integration.py.",
         "",
-        f'kind    = "{kind}"',
-        f"version = {args.version}",
-        f'span    = "{args.span}"',
-        "",
-        "members = [",
+        "[membership]",
+        "# mode = auto: the tracker resolves members from rig + span every ingest,",
+        "# so this integration grows automatically as you add nights.",
+        'mode = "auto"',
     ]
-    lines += [f'  "{ms}",' for ms in members]
+    if rig:
+        lines.append(f'rig  = "{rig}"          # scope+sensor; omit for a composite')
+    else:
+        lines.append('# rig omitted → composite (all rigs for this target/span)')
+    lines.append(f'span = "{span}"')
+    if goal_hours is not None:
+        lines.append(f"goal_hours = {goal_hours:g}")
     lines += [
+        "",
+        "[built]",
+        "# Sessions actually stacked into the current master. Fill this with",
+        "# mark_integrated.py after each stack (or by hand). built_machine = the PC.",
+        'built_machine = ""',
+        "sessions = [",
         "]",
         "",
         "[pipeline]",
@@ -140,12 +127,71 @@ def main():
         '"""',
         "",
     ]
+    return "\n".join(lines)
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Scaffold a living multi-session integration folder + manifest.")
+    ap.add_argument("--target", required=True,
+                    help="target folder name, e.g. 'M 81 Bodes Galaxy'")
+    ap.add_argument("--span", required=True,
+                    help="'2026' | a range like '2024-2026' | 'all'")
+    ap.add_argument("--rig", default="",
+                    help="one rig 'scope sensor', e.g. 'RASA8 ASI2600MCAir'; "
+                         "omit for a composite across rigs")
+    ap.add_argument("--goal", type=float, default=None,
+                    help="integration-hours goal for the dashboard (e.g. 50)")
+    ap.add_argument("--apply", action="store_true",
+                    help="actually create the folder (default: preview only)")
+    ap.add_argument("--config", default=None,
+                    help="path to config.toml (default: next to this script)")
+    args = ap.parse_args()
+
+    libraries = astro_config.load_libraries(args.config)
+    tpath = find_target(args.target, libraries)
+    if not tpath:
+        sys.exit(f"Target folder not found in any configured library: {args.target}")
+
+    members, rigs = select_members(tpath, args.span, args.rig)
+    if not members:
+        sys.exit(f"No sessions matched span '{args.span}'"
+                 + (f" / rig '{args.rig}'" if args.rig else "")
+                 + f" under {args.target}.")
+
+    target_id = SESSION_RE.match(members[0]).group("target")
+    kind = "multi-session" if args.rig or len(rigs) == 1 else "composite"
+    rig_label = args.rig if args.rig else "composite"
+    folder = f"{target_id} {rig_label} {args.span}"
+    dest = os.path.join(tpath, "integrations", folder)
+
+    print(f"Target      : {args.target}")
+    print(f"Integration : {folder}   ({kind}, {len(rigs)} rig(s))")
+    print(f"Rule        : mode=auto, rig={args.rig or '(any)'}, span={args.span}"
+          + (f", goal={args.goal:g}h" if args.goal is not None else ""))
+    print(f"Matches today ({len(members)} sessions):")
+    for ms in members:
+        print(f"  {ms}")
+
+    if os.path.exists(dest):
+        sys.exit(f"\nERROR: integration folder already exists:\n  {dest}")
+
+    if not args.apply:
+        print(f"\nDRY RUN — nothing created. Re-run with --apply to create:\n"
+              f"  integrations/{folder}/  "
+              f"(PI Process/, PI Magic/, '{folder} Results/', integration.toml)")
+        return
+
+    os.makedirs(os.path.join(dest, "PI Process"))
+    os.makedirs(os.path.join(dest, "PI Magic"))
+    os.makedirs(os.path.join(dest, f"{folder} Results"))
     with open(os.path.join(dest, "integration.toml"), "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines))
+        fh.write(build_manifest(args.rig, args.span, args.goal))
 
     print(f"\nCreated: {dest}")
-    print("Next: build the integration in PixInsight in that folder, then "
-          "re-run ingest.py.")
+    print("Next: build it in PixInsight in that folder, then run\n"
+          f'  python3 mark_integrated.py "{dest}"\n'
+          "and re-run ingest.py.")
 
 
 if __name__ == "__main__":

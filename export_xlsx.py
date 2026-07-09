@@ -279,21 +279,32 @@ def main():
     if has_integrations:
         for r in cur.execute("""
             SELECT common_name, target_id, kind, folder_name,
-                   COALESCE(scope || ' ' || sensor, 'composite') AS rig,
-                   span, version, session_count, furthest_stage
-            FROM v_integration_overview ORDER BY target_id, version"""):
+                   COALESCE(scope || ' ' || sensor, 'composite') AS rig, span,
+                   COALESCE(built_hours, 0) AS built_hours,
+                   COALESCE(available_hours, 0) AS available_hours,
+                   goal_hours, sessions_built, sessions_available,
+                   data_through, COALESCE(built_machine, '') AS machine,
+                   is_stale, furthest_stage
+            FROM v_integration_overview ORDER BY target_id, folder_name"""):
+            pct = (round(100.0 * r["available_hours"] / r["goal_hours"])
+                   if r["goal_hours"] else None)
+            state = ("Stale (+%d)" % (r["sessions_available"] - r["sessions_built"])
+                     if r["is_stale"] else "Current")
             i_rows.append([r["common_name"] or r["target_id"], r["kind"],
-                           r["rig"], r["span"], r["version"],
-                           r["session_count"], r["furthest_stage"],
-                           r["folder_name"]])
+                           r["rig"], r["span"],
+                           r["built_hours"], r["available_hours"], r["goal_hours"],
+                           pct, r["sessions_built"], r["sessions_available"],
+                           r["data_through"], r["machine"], state,
+                           r["furthest_stage"], r["folder_name"]])
     n_integ = len(i_rows)
     wi = wb.create_sheet("Integrations")
-    i_headers = ["Target", "Kind", "Rig", "Span", "Version", "Sessions",
-                 "Stage", "Folder"]
+    i_headers = ["Target", "Kind", "Rig", "Span", "Built (hrs)", "Available (hrs)",
+                 "Goal (hrs)", "Progress %", "Sessions Built", "Sessions Available",
+                 "Data Through", "Machine", "State", "Stage", "Folder"]
     write_sheet(wi, i_headers,
-                i_rows or [["(no multi-session integrations yet)",
-                            "", "", "", "", "", "", ""]],
-                col_formats={5: "0", 6: "0"})
+                i_rows or [["(no multi-session integrations yet)"] + [""] * 14],
+                col_formats={5: "0.00", 6: "0.00", 7: "0.00", 8: "0",
+                             9: "0", 10: "0"})
 
     # ----------------------------------------------------------- Data Health
     v_rows = []
