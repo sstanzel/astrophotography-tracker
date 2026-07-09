@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-promote_masters.py - copy integrated master files into their Results folders.
+promote_masters.py - copy keeper files into their Results folders.
 
-The integrated master (the stacked light) is a keeper, but PixInsight / PI Magic
-Studio leave it inside the working folders (PI Process / PI Magic) that
-clean_processing.py is free to delete. This script walks the libraries, finds the
-master in each session's or integration's working folders, and copies it to the
-sibling "{name} Results" folder if it is not already there — so the keeper is safe
-before the working folders are swept.
+Keepers are the integrated **master** (the stacked light) and any Photoshop
+**.psd** edit — both belong in Results, but PixInsight / PI Magic Studio leave
+them inside the working folders (PI Process / PI Magic) that clean_processing.py
+is free to delete. This script walks the libraries, finds the keepers in each
+session's or integration's working folders, and copies them to the sibling
+"{name} Results" folder if not already there — so they are safe before the
+working folders are swept.
 
 Model: raw data lives in Light/ + calibration; keepers (master + flat exports)
 live in Results/; PI Process / PI Magic are recreatable scratch. This script is
@@ -44,16 +45,23 @@ MASTER_EXCLUDE = re.compile(
     r"(rejection|master\s*dark|master\s*flat|master\s*bias|_cal_|_wcs|weight)", re.I)
 
 
-def is_master(name: str) -> bool:
-    """True if a filename looks like an integrated master (a keeper stack).
+def is_keeper(name: str) -> bool:
+    """True if a file belongs in Results — the integrated master, or a .psd edit.
+
+    A Photoshop .psd is always a keeper. Otherwise the file must look like an
+    integrated master (name matches INCLUDE and not EXCLUDE, image extension)
+    rather than a working product.
 
     Args:
         name: file basename.
 
     Returns:
-        Whether it is the integrated master rather than a working product.
+        Whether the file should be copied to Results.
     """
-    if not name.lower().endswith(MASTER_EXTS):
+    low = name.lower()
+    if low.endswith(".psd"):
+        return True
+    if not low.endswith(MASTER_EXTS):
         return False
     return bool(MASTER_INCLUDE.search(name)) and not MASTER_EXCLUDE.search(name)
 
@@ -70,25 +78,25 @@ def results_dir_for(container: str) -> str:
     return os.path.join(container, f"{os.path.basename(container)} Results")
 
 
-def find_masters(container: str) -> list[str]:
-    """Return master files found in a container's working folders.
+def find_keepers(container: str) -> list[str]:
+    """Return keeper files (master + .psd) in a container's working folders.
 
     Args:
         container: absolute path of the session or integration folder.
 
     Returns:
-        Absolute paths of master files under PI Process / PI Magic.
+        Absolute paths of keepers under PI Process / PI Magic.
     """
-    masters = []
+    keepers = []
     for wf in WORKING_FOLDERS:
         wpath = os.path.join(container, wf)
         if not os.path.isdir(wpath):
             continue
         for root, _dirs, files in os.walk(wpath):
             for f in files:
-                if not f.startswith("._") and is_master(f):
-                    masters.append(os.path.join(root, f))
-    return masters
+                if not f.startswith("._") and is_keeper(f):
+                    keepers.append(os.path.join(root, f))
+    return keepers
 
 
 def iter_containers(library_root: str):
@@ -130,12 +138,12 @@ def plan_copies(libraries, only: str | None):
         for container in iter_containers(root):
             if only and only not in container:
                 continue
-            masters = find_masters(container)
-            if not masters:
+            keepers = find_keepers(container)
+            if not keepers:
                 continue
             rdir = results_dir_for(container)
             present = set(os.listdir(rdir)) if os.path.isdir(rdir) else set()
-            for m in masters:
+            for m in keepers:
                 dst = os.path.join(rdir, os.path.basename(m))
                 plan.append((m, dst, os.path.basename(m) in present))
     return plan
@@ -144,7 +152,7 @@ def plan_copies(libraries, only: str | None):
 def main() -> None:
     """Preview or apply the master → Results copies across the libraries."""
     ap = argparse.ArgumentParser(
-        description="Copy integrated masters into their Results folders.")
+        description="Copy keepers (integrated master + .psd) into Results folders.")
     ap.add_argument("--only", default=None,
                     help="limit to containers whose path contains this substring")
     ap.add_argument("--apply", action="store_true",
@@ -157,7 +165,7 @@ def main() -> None:
     pending = [p for p in plan if not p[2]]
 
     if not plan:
-        print("No masters found in any working folder.")
+        print("No keepers (master / .psd) found in any working folder.")
         return
 
     for src, dst, present in plan:
@@ -167,7 +175,7 @@ def main() -> None:
         if not present:
             print(f"           into {rel}")
 
-    print(f"\n{len(pending)} master(s) to copy, "
+    print(f"\n{len(pending)} keeper(s) to copy, "
           f"{len(plan) - len(pending)} already in Results.")
     if not args.apply:
         print("DRY RUN — nothing copied. Re-run with --apply.")
@@ -180,7 +188,7 @@ def main() -> None:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
         copied += 1
-    print(f"Copied {copied} master(s) into their Results folders.")
+    print(f"Copied {copied} keeper(s) into their Results folders.")
 
 
 if __name__ == "__main__":

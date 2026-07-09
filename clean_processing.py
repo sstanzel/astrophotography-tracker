@@ -9,9 +9,10 @@ safe to clear. This script empties their *contents* but leaves the (now empty)
 folders in place, since they are part of the PostHaste session template.
 
 SAFE BY DEFAULT: a plain run only previews. Nothing is deleted until you pass
---apply. And as a safety net, any container whose integrated master is not yet
-in its "{name} Results" folder is SKIPPED and reported — run promote_masters.py
-first, or pass --promote to copy the master to Results before cleaning.
+--apply. And as a safety net, any container whose keeper (the integrated master
+or a .psd edit) is not yet in its "{name} Results" folder is SKIPPED and
+reported — run promote_masters.py first, or pass --promote to copy the keepers
+to Results before cleaning.
 
 Run natively on the Mac:
     python3 "clean_processing.py"                # preview (dry run)
@@ -28,7 +29,7 @@ import argparse, os, shutil, sys
 # Library paths come from config.toml (via astro_config) — not hardcoded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import astro_config   # noqa: E402
-from promote_masters import find_masters, results_dir_for   # noqa: E402
+from promote_masters import find_keepers, results_dir_for   # noqa: E402
 
 WORKING_FOLDERS = ("PI Process", "PI Magic")   # folders whose contents get cleared
 SKIP_TOPLEVEL = {"_organization", "_Calibration Library", "_sessions to organize"}
@@ -55,23 +56,23 @@ def tree_size(path):
     return fc, sz
 
 
-def unpromoted_masters(container):
-    """Return integrated masters in a container's working folders not yet in Results.
+def unpromoted_keepers(container):
+    """Return keepers (master + .psd) in the working folders not yet in Results.
 
-    The keeper master must reach the "{name} Results" folder before the working
-    folders (PI Process / PI Magic) are emptied. Any master still only in the
-    working folders is returned so the caller can gate or promote it.
+    Keepers must reach the "{name} Results" folder before the working folders
+    (PI Process / PI Magic) are emptied. Any keeper still only in the working
+    folders is returned so the caller can gate or promote it.
 
     Args:
         container: absolute path of the session or integration folder.
 
     Returns:
-        List of master file paths under the working folders whose basename is
+        List of keeper file paths under the working folders whose basename is
         not already present in the Results folder.
     """
     rdir = results_dir_for(container)
     present = set(os.listdir(rdir)) if os.path.isdir(rdir) else set()
-    return [m for m in find_masters(container)
+    return [m for m in find_keepers(container)
             if os.path.basename(m) not in present]
 
 
@@ -169,10 +170,10 @@ def main():
             for pname, ppath in parents:
                 if args.only and args.only not in pname:
                     continue
-                # Gate: the integrated master must be in Results before the
-                # working folders are emptied. If it is not, either promote it
+                # Gate: keepers (master + .psd) must be in Results before the
+                # working folders are emptied. If any is not, either promote it
                 # (--promote) or skip this whole container.
-                pending = unpromoted_masters(ppath)
+                pending = unpromoted_keepers(ppath)
                 if pending and not args.promote:
                     for wf in WORKING_FOLDERS:
                         wpath = os.path.join(ppath, wf)
@@ -212,16 +213,16 @@ def main():
 
     if promoted:
         tag = "promoted" if args.apply else "would promote"
-        print(f"\n  MASTER → Results ({tag} before cleaning):")
+        print(f"\n  KEEPER → Results ({tag} before cleaning):")
         for src, rdir in promoted:
             print(f"    {os.path.basename(src)}  →  {rdir}")
 
     if skipped:
-        print(f"\n  SKIPPED — the integrated master is not in Results yet "
+        print(f"\n  SKIPPED — a keeper (master or .psd) is not in Results yet "
               f"(run promote_masters.py, or re-run with --promote):")
-        for wpath, master in skipped:
+        for wpath, keeper in skipped:
             print(f"    {wpath}")
-            print(f"      master still only in working: {os.path.basename(master)}")
+            print(f"      keeper still only in working: {os.path.basename(keeper)}")
 
     # ---- prunable multi-session integrations (read-only report) ----
     report_prunable_integrations()
@@ -243,9 +244,9 @@ def main():
     print(f"Done — emptied {removed_folders} folder(s), "
           f"removed {removed_files} files, reclaimed {human(total_bytes)}.")
     if promoted:
-        print(f"Promoted {len(promoted)} master(s) to Results first.")
+        print(f"Promoted {len(promoted)} keeper(s) to Results first.")
     if skipped:
-        print(f"{len(skipped)} folder(s) skipped (master not in Results).")
+        print(f"{len(skipped)} folder(s) skipped (keeper not in Results).")
 
 
 if __name__ == "__main__":
