@@ -109,6 +109,9 @@ def main():
                                    t.common_name, s.scope, s.sensor, s.session_date,
                                    s.lights_kept AS lights, s.lights_rejected AS rejected,
                                    ROUND(s.integration_s/3600.0,2) AS hours,
+                                   COALESCE(s.pi_magic_machine,
+                                            CASE WHEN s.pi_magic_studio THEN 'Yes' END,
+                                            '') AS pi_magic,
                                    s.is_other_capture AS other
                             FROM sessions s JOIN targets t USING(target_id)
                             ORDER BY s.session_date DESC, s.target_id"""),
@@ -411,7 +414,8 @@ countTable("sessionPipeline", D.sessionPipeline);
   const cols = [
     ["session_date","Date"],["target_id","Target"],["common_name","Name"],
     ["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],
-    ["rejected","Rej.","num"],["hours","Hrs","num"],["library","Lib"],
+    ["rejected","Rej.","num"],["hours","Hrs","num"],
+    ["pi_magic","PI Magic Studio"],["library","Lib"],
   ];
   let sortKey="session_date", sortDir=-1;
   const tbl = document.getElementById("sessionsTable");

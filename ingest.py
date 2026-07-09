@@ -141,7 +141,8 @@ def read_notes_toml(session_path, session_name):
     for a session's {name} notes.toml. Regex parse — zero dependencies."""
     out = dict(present=False, location=None, moon_phase=None,
                moon_illumination=None, moon_age_days=None,
-               edited=False, published=False, printed=False, astrobin_url=None)
+               edited=False, published=False, printed=False, astrobin_url=None,
+               pi_magic_studio=False, pi_magic_machine=None, pi_magic_date=None)
     p = os.path.join(session_path, f"{session_name} notes.toml")
     if not os.path.isfile(p):
         return out
@@ -168,6 +169,16 @@ def read_notes_toml(session_path, session_name):
     m = re.search(r'^moon_age_days\s*=\s*([0-9.]+)', txt, re.M)
     if m:
         out["moon_age_days"] = float(m.group(1))
+    # PI Magic Studio initial-processing markers (any section; flat regex).
+    fm = re.search(r'^\s*pi_magic_studio\s*=\s*(true|false)', txt, re.M | re.I)
+    out["pi_magic_studio"] = bool(fm) and fm.group(1).lower() == "true"
+    m = re.search(r'^\s*pi_magic_machine\s*=\s*"([^"]*)"', txt, re.M)
+    if m and m.group(1):
+        out["pi_magic_machine"] = m.group(1)
+        out["pi_magic_studio"] = True   # a named machine implies it was run
+    m = re.search(r'^\s*pi_magic_date\s*=\s*"([^"]*)"', txt, re.M)
+    if m and m.group(1):
+        out["pi_magic_date"] = m.group(1)
     return out
 
 
@@ -249,6 +260,9 @@ SESSION_NEW_COLS = [
     ("stage_publish",       "INTEGER DEFAULT 0"),   # 6
     ("stage_print",         "INTEGER DEFAULT 0"),   # 7
     ("astrobin_url",        "TEXT"),
+    ("pi_magic_studio",     "INTEGER DEFAULT 0"),   # 1 if run in PI Magic Studio
+    ("pi_magic_machine",    "TEXT"),                # which PC ran it
+    ("pi_magic_date",       "TEXT"),                # YYYY-MM-DD (optional)
 ]
 
 # frames table rebuild — used by apply_migrations when an old DB's grammar CHECK
@@ -673,6 +687,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   fits_site_lat=?, fits_site_lon=?, fits_instrument=?,
                   mount=?, location_label=?, bortle=?,
                   moon_age_days=?, moon_phase_pct=?, notes_path=?,
+                  pi_magic_studio=?, pi_magic_machine=?, pi_magic_date=?,
                   updated_at=CURRENT_TIMESTAMP
                 WHERE session_id=?
             """, (counts["light"], rejected, counts["flat"], counts["dark_flat"],
@@ -687,6 +702,8 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   hdr["site_lat"], hdr["site_lon"], hdr["instrument"],
                   hdr["telescope"], notes["location"], bortle,
                   notes["moon_age_days"], notes["moon_illumination"], notes_rel,
+                  1 if notes["pi_magic_studio"] else 0,
+                  notes["pi_magic_machine"], notes["pi_magic_date"],
                   sid))
 
     con.commit()

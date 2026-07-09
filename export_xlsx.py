@@ -103,7 +103,8 @@ def main():
     # S OtherCapture T FolderPath
     s_headers = ["Library", "Target ID", "Catalog", "Common Name", "Scope", "Sensor",
                  "Session Date", "Year", "Lights", "Rejected", "Flats", "Dark Flats",
-                 "Darks", "Bias", "Integration (hrs)", "Capture", "Blink/Reject",
+                 "Darks", "Bias", "Integration (hrs)", "PI Magic Studio",
+                 "Capture", "Blink/Reject",
                  "Calibrate", "Other Capture", "Integrate", "Edit", "Publish",
                  "Print", "AstroBin URL", "Folder Path"]
     s_rows = []
@@ -112,6 +113,7 @@ def main():
                s.session_date, s.lights_kept, s.lights_rejected, s.flats_count,
                s.dark_flats_count, s.darks_count, s.bias_count,
                ROUND(s.integration_s/3600.0, 2) AS hrs,
+               s.pi_magic_studio, s.pi_magic_machine,
                s.stage_capture, s.stage_blink_reject, s.stage_calibrate,
                s.stage_integrate, s.stage_edit, s.stage_publish, s.stage_print,
                s.astrobin_url, s.is_other_capture, s.folder_path
@@ -123,6 +125,7 @@ def main():
             r["scope"], r["sensor"], r["session_date"], year, r["lights_kept"],
             r["lights_rejected"], r["flats_count"], r["dark_flats_count"],
             r["darks_count"], r["bias_count"], r["hrs"],
+            (r["pi_magic_machine"] or ("Yes" if r["pi_magic_studio"] else "")),
             stage_text(r["stage_capture"]), stage_text(r["stage_blink_reject"]),
             stage_text(r["stage_calibrate"]),
             "Yes" if r["is_other_capture"] else "No",

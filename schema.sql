@@ -126,6 +126,13 @@ CREATE TABLE sessions (
     moon_phase_pct      REAL,
     guide_camera        TEXT,
     guide_scope         TEXT,
+    -- PI Magic Studio initial-processing tracking. Manual: set in the session's
+    -- notes.toml [processing] section, re-read (never overwritten) every ingest.
+    -- machine records WHICH PC ran it; a non-null machine (or the flag = true)
+    -- means done in PI Magic Studio rather than PixInsight initially.
+    pi_magic_studio     INTEGER DEFAULT 0,   -- 1 if run in PI Magic Studio
+    pi_magic_machine    TEXT,                -- which machine (e.g. 'MacMini', 'Alienware')
+    pi_magic_date       TEXT,                -- YYYY-MM-DD it was run (optional)
     -- validation inputs (recorded by the ingest walk; feed the validate() pass)
     notes_toml_present  INTEGER DEFAULT 0,   -- 1 if {session} notes.toml exists
     unparsed_file_count INTEGER DEFAULT 0,   -- raw-capture FITS files whose name did not parse
