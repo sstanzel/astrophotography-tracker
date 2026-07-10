@@ -26,10 +26,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import astro_config   # noqa: E402
 
 # Top-level folders that are "other captures" — recorded but exempt from
-# deep-sky integration totals and v2 naming enforcement.
+# deep-sky integration totals and v2 naming enforcement. Deliberately one
+# level deep: the science topics are top-level buckets, not Science/{topic}.
+# "Moon Daytime"/"Moon Nighttime" merge into "Moon" and the time-lapse bucket
+# folds into "Nightscapes" — the old names stay recognized until those two
+# library cleanups are done (work items in Things, 2026-07-10).
 OTHER_CAPTURE_FOLDERS = {
-    "ASI EAA", "Moon Daytime", "Moon Nighttime", "Asteroids Comets",
-    "As_Tl_Astrophotography Timelapse", "As_misc",
+    "ASI EAA", "Asteroids Comets", "As_misc",
+    "Moon", "Moon Daytime", "Moon Nighttime",
+    "Planets",
+    "Nightscapes", "As_Tl_Astrophotography Timelapse",
+    "Astrometry", "Spectroscopy", "Photometry", "Exoplanets", "Double Stars",
 }
 
 # Folders to skip entirely at the target level.
