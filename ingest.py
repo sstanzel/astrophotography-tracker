@@ -184,7 +184,7 @@ def read_notes_toml(session_path, session_name):
     """
     out = dict(present=False, location=None, moon_phase=None,
                moon_illumination=None, moon_age_days=None,
-               edited=False, culled=False, published=[], printed=[])
+               edited=False, culled=False, published=[], printed=[], todos=[])
     p = os.path.join(session_path, f"{session_name} notes.toml")
     if not os.path.isfile(p):
         return out
@@ -210,6 +210,9 @@ def read_notes_toml(session_path, session_name):
     m = re.search(r'^moon_age_days\s*=\s*([0-9.]+)', txt, re.M)
     if m:
         out["moon_age_days"] = float(m.group(1))
+    # [future_processing] todo = [ "…", "…" ]  — reprocessing to-do items.
+    am = re.search(r'(?ms)^\s*todo\s*=\s*\[(.*?)\]', txt)
+    out["todos"] = re.findall(r'"([^"]*)"', am.group(1)) if am else []
     return out
 
 
@@ -601,7 +604,17 @@ def apply_migrations(con):
             in_build       INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (integration_id, session_id)
         );
+        CREATE TABLE IF NOT EXISTS processing_todos (
+            session_id  INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+            seq         INTEGER NOT NULL,
+            todo        TEXT NOT NULL,
+            PRIMARY KEY (session_id, seq)
+        );
     """)
+    pcols = {r[1] for r in cur.execute("PRAGMA table_info(publications)")}
+    if pcols and "integration_id" not in pcols:
+        cur.execute("ALTER TABLE publications ADD COLUMN integration_id INTEGER "
+                    "REFERENCES integrations(integration_id)")
     # In-place column adds for a pre-existing integrations table / members table.
     icols = {r[1] for r in cur.execute("PRAGMA table_info(integrations)")}
     for col, decl in INTEGRATION_NEW_COLS:
@@ -1013,6 +1026,10 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   sid))
             insert_publications(cur, tp["target_id"], sid, None,
                                 notes["published"], notes["printed"])
+            cur.execute("DELETE FROM processing_todos WHERE session_id=?", (sid,))
+            for i, td in enumerate(notes["todos"]):
+                cur.execute("INSERT INTO processing_todos(session_id, seq, todo) "
+                            "VALUES(?,?,?)", (sid, i, td))
 
     con.commit()
     log(f"  {library_id}: {n_targets} targets, {n_sessions} sessions, {n_frames} frames")

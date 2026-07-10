@@ -251,6 +251,13 @@ def main():
         LEFT JOIN integrations i ON i.integration_id=p.integration_id
         LEFT JOIN sessions s ON s.session_id=p.session_id
         WHERE p.kind='print' ORDER BY p.published_at DESC, t.common_name""")
+    data["todos"] = rows("""
+        SELECT pt.todo, t.common_name AS target,
+               s.scope||' '||s.sensor AS rig, s.session_date AS date
+        FROM processing_todos pt
+        JOIN sessions s ON s.session_id=pt.session_id
+        JOIN targets t USING(target_id)
+        ORDER BY s.session_date DESC, pt.seq""")
     con.close()
 
     html = HTML_TEMPLATE.replace("/*DATA*/", json.dumps(data))
@@ -342,6 +349,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div id="wqChips" style="margin-bottom:10px"></div>
   <div style="margin-bottom:10px"><input type="search" id="wqfilter" placeholder="filter this list..."></div>
   <div class="scroll"><table id="wqTable"></table></div>
+</div>
+
+<div class="panel">
+  <h2>Processing to-dos</h2>
+  <div class="sub" style="margin-bottom:8px">From the <code>[future_processing]</code> todo lists in session notes.toml.</div>
+  <div style="margin-bottom:10px"><input type="search" id="todofilter" placeholder="filter to-dos..."></div>
+  <div class="scroll"><table id="todoTable"></table></div>
 </div>
 
 <div class="grid two">
@@ -627,6 +641,16 @@ function sortableTable(tblEl, cols, data, opts){
   }
   fbox.oninput = ()=>{ if(draw) draw(fbox.value); };
   build();
+})();
+
+// ---- processing to-dos ----
+(function(){
+  const fbox = document.getElementById("todofilter");
+  const draw = sortableTable(document.getElementById("todoTable"),
+    [["todo","To-do"],["target","Target"],["rig","Rig"],["date","Date"]],
+    D.todos||[], {sortKey:"date",sortDir:-1,getFilter:()=>fbox.value});
+  draw("");
+  fbox.oninput = ()=>draw(fbox.value);
 })();
 
 // ---- publish / print ledgers ----

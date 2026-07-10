@@ -290,6 +290,15 @@ CREATE TABLE publications (
 CREATE INDEX idx_publications_target ON publications(target_id);
 CREATE INDEX idx_publications_kind   ON publications(kind);
 
+-- Reprocessing to-do items, one row per entry in a session notes.toml's
+-- [future_processing] todo list. Rebuilt from the files every ingest.
+CREATE TABLE processing_todos (
+    session_id  INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    seq         INTEGER NOT NULL,
+    todo        TEXT NOT NULL,
+    PRIMARY KEY (session_id, seq)
+);
+
 CREATE INDEX idx_pub_target  ON publications(target_id);
 CREATE INDEX idx_pub_session ON publications(session_id);
 
