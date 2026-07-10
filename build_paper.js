@@ -26,8 +26,7 @@ const STATS = {
   targetsImaged: 72,
   keptLights: "10,740",
   rejectedLights: "1,359",
-  calibrationGB: "404",
-  calibrationSets: 220,
+  calibrationSets: 133,   // bias + dark sets only (legacy flats not counted)
   streamHours: "377", streamSessions: 113,
   peakHours: "376", peakSessions: 103,
 };
@@ -203,13 +202,12 @@ children.push(h1("6.  Calibration, organized by reusability"));
 children.push(p("Calibration frames divide cleanly by what they depend on, and that dependency decides where they live:"));
 children.push(bulletRich([new TextRun({ text: "Flats and dark-flats depend on the night ", bold: true, font: ARIAL }), new TextRun({ text: "— the focuser position, the camera's rotational alignment, and the dust state of the optical train. They stay with the session they calibrate, in a subdirectory named for the rig and date. When several targets share one flat set on a multi-target night, the other sessions reference the set in their notes file rather than duplicating it.", font: ARIAL })]));
 children.push(bulletRich([new TextRun({ text: "Bias and dark frames depend only on the camera and its settings ", bold: true, font: ARIAL }), new TextRun({ text: "— gain for bias; gain, exposure, and sensor temperature for darks. They are captured once per combination, live in a shared calibration library, and are worth pre-building into master frames that are then reused for years.", font: ARIAL })]));
-children.push(p(`The shared library currently holds ${STATS.calibrationSets} calibration sets, roughly ${STATS.calibrationGB} gigabytes, organized around hardware rather than targets:`));
+children.push(p(`The shared library currently holds ${STATS.calibrationSets} bias and dark sets, organized around hardware rather than targets:`));
 children.push(...codeBlock([
   "_Calibration Library/",
   "├── Bias/{Camera}/Bias {Date}/                            ← dated bias sets",
   "├── Dark/{Camera}/{Temp}/{Gain}/{Exposure}/Dark {Date}/   ← dated dark sets",
-  "├── Flat/{Scope}_{Sensor}/Flat {Scope}_{Sensor} {Date}/   ← per-rig flat history",
-  "└── !camera/ , !scope_sensor/ …                           ← duplicate-and-rename templates",
+  "└── !camera/ …                                            ← duplicate-and-rename templates",
 ]));
 children.push(p("Two conventions make the library machine-readable. First, camera folder names are drawn from the same sensor_values registry as session names, so a light frame's camera and a dark set's camera match by exact string — the key that makes the coverage report in Section 11 possible. Second, “this set has a master” is detected from the files themselves: when a master frame (master*.xisf or equivalent) is dropped into a set's folder, the tracker sees it on the next scan and the set counts as mastered. No list of masters is maintained anywhere. The parser also reads set parameters from either the folder tree ({Temp}/{Gain}/{Exposure}) or from ASIAir-style set names such as Dark_300.0s_Bin1_2600MC_gain100_-20.0C, so bulk dark libraries captured in one sitting need no re-foldering."));
 children.push(p("Each calibration class carries thresholds — a minimum frame count and a refresh age in days — stored as data, not code. Every scan classifies each bias and dark combination as ok, no master (raw frames waiting to be built), or stale (new raw frames captured after the master was built, or the master older than its refresh age). The classification feeds the work queue directly."));
@@ -354,7 +352,7 @@ children.push(table([5300, 1700, 1700, 660], ["Metric", "Working", "Archive", "T
   ["Kept light frames", "", "", STATS.keptLights],
   ["Rejected light frames", "", "", STATS.rejectedLights],
   ["Other-capture sessions", "", "", String(STATS.otherCaptureSessions)],
-  ["Calibration library", "", "", `${STATS.calibrationGB} GB · ${STATS.calibrationSets} sets`],
+  ["Calibration library (bias + dark sets)", "", "", String(STATS.calibrationSets)],
 ]));
 children.push(p("Top ten deep-sky targets by lifetime integration:"));
 children.push(table([3600, 1100, 1100, 3560], ["Target", "Hours", "Sessions", "Scopes used"], [
