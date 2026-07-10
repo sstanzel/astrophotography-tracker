@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """
-preflight.py — validate staged session folders BEFORE moving them into a library.
+preflight.py — validate staged session folders, then (optionally) file them.
 
-Read-only: never touches tracker.db and never modifies the staging folder.
+Read-only by default: never touches tracker.db or the staging folder. With
+--apply it FILES the passing sessions into the library — creating the target
+folder from the registry when the library doesn't have it yet. The registry's
+`target folders/` is the single source of truth for target names: libraries
+carry no empty target folders; a folder appears in a library the first time a
+session for it is filed (design decided 2026-07-10).
+
 Reuses the exact grammars ingest.py applies (SESSION_RE, parse_target_folder,
 fits_parser.parse), so a clean pre-flight means ingest will parse the session
 the same way after the move.
 
 Checks per staged folder:
   ERROR  name does not parse as `<Target_id> <Scope> <Sensor> <YYYY-MM-DD>`
-  ERROR  no target folder in the destination library matches the target token
+  ERROR  target token matches neither a library target folder nor a registry entry
   ERROR  destination target folder already has a same-named session (collision)
   WARN   scope / sensor / scope+sensor combo not in the _organization registry
   WARN   no kept light frames found
@@ -20,10 +26,13 @@ Checks per staged folder:
 Usage:
     python3 preflight.py                  # staging + library from config.toml
     python3 preflight.py --staging PATH --library PATH
+    python3 preflight.py --apply          # file the OK sessions
+    python3 preflight.py --apply --force  # ...including the WARN ones
 """
 import argparse
 import datetime as dt
 import os
+import shutil
 import sys
 from collections import Counter
 
@@ -82,28 +91,34 @@ def library_target_map(library_root: str) -> dict[str, str]:
 
 
 def check_session(spath: str, sname: str, targets: dict[str, str],
+                  reg_targets: dict[str, str],
                   scopes: set[str], sensors: set[str], combos: set[str],
-                  library_root: str) -> tuple[list[str], list[str], list[str]]:
+                  library_root: str) -> tuple[list[str], list[str], list[str], str | None]:
     """Run every pre-flight check against one staged session folder.
 
     Args:
         spath: absolute path of the staged session folder.
         sname: folder basename.
         targets: target_id -> folder name map for the destination library.
+        reg_targets: target_id -> folder name map for the registry
+            (`_organization/target folders/`) — the single source of truth;
+            used when the library has no folder for the target yet.
         scopes/sensors/combos: registry vocabularies.
         library_root: destination library root (for collision check).
 
     Returns:
-        (errors, warnings, infos) — lists of human-readable findings.
+        (errors, warnings, infos, dest_folder) — findings plus the target
+        folder name the session files into (None when the name is unusable).
     """
     errors: list[str] = []
     warnings: list[str] = []
     infos: list[str] = []
+    dest: str | None = None
 
     m = SESSION_RE.match(sname)
     if not m:
         errors.append("name does not parse as `<Target_id> <Scope> <Sensor> <YYYY-MM-DD>`")
-        return errors, warnings, infos
+        return errors, warnings, infos, dest
 
     target_tok, scope, sensor, sdate = (m.group("target"), m.group("scope"),
                                         m.group("sensor"), m.group("date"))
@@ -111,22 +126,28 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
         session_date = dt.date.fromisoformat(sdate)
     except ValueError:
         errors.append(f"date token {sdate!r} is not a real calendar date")
-        return errors, warnings, infos
+        return errors, warnings, infos, dest
 
     # -- destination target folder ------------------------------------------
     # Adjacent-field sessions resolve to the BASE target's folder (see
-    # ADJACENT_SUFFIX note above).
+    # ADJACENT_SUFFIX note above). The library folder wins when it exists;
+    # otherwise the registry names the folder to create at filing time.
     lookup_tok = target_tok
     if target_tok.lower().endswith(ADJACENT_SUFFIX):
         lookup_tok = target_tok[:-len(ADJACENT_SUFFIX)]
+    suffix_note = " (adjacent-field session -> base target)" if lookup_tok != target_tok else ""
     tfolder = targets.get(lookup_tok)
-    if tfolder is None:
-        errors.append(f"no target folder in library matches target token {lookup_tok!r}")
-    else:
-        suffix_note = " (adjacent-field session -> base target)" if lookup_tok != target_tok else ""
+    if tfolder is not None:
+        dest = tfolder
         infos.append(f"destination: {tfolder}/{suffix_note}")
         if os.path.isdir(os.path.join(library_root, tfolder, sname)):
             errors.append(f"collision: {tfolder}/{sname} already exists in the library")
+    elif lookup_tok in reg_targets:
+        dest = reg_targets[lookup_tok]
+        infos.append(f"destination: {dest}/ (created from the registry){suffix_note}")
+    else:
+        errors.append(f"target token {lookup_tok!r} matches neither a library "
+                      f"target folder nor a registry entry")
 
     # -- registry vocabularies ----------------------------------------------
     if scope not in scopes:
@@ -191,7 +212,7 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
     if unparsed:
         infos.append(f"{len(unparsed)} unparsed FITS filename(s), e.g. {unparsed[0]!r}")
 
-    return errors, warnings, infos
+    return errors, warnings, infos, dest
 
 
 def main() -> None:
@@ -209,6 +230,11 @@ def main() -> None:
                     help=f"staged-sessions folder (default: <working library>/{STAGING_DIRNAME})")
     ap.add_argument("--library", default=default_library,
                     help="destination library root (default: the working library)")
+    ap.add_argument("--apply", action="store_true",
+                    help="file the passing sessions into the library (creates "
+                         "the target folder from the registry when missing)")
+    ap.add_argument("--force", action="store_true",
+                    help="with --apply: also file sessions that only have warnings")
     args = ap.parse_args()
 
     if not args.staging or not os.path.isdir(args.staging):
@@ -217,6 +243,8 @@ def main() -> None:
         sys.exit(f"Destination library not found: {args.library}")
 
     targets = library_target_map(args.library)
+    reg_targets = {parse_target_folder(name)["target_id"]: name
+                   for name in registry_names("target folders")}
     scopes = registry_names("scope_values")
     sensors = registry_names("sensor_values")
     combos = registry_names("scope+sensor_values")
@@ -226,14 +254,15 @@ def main() -> None:
     print(f"Registry  : {len(scopes)} scopes, {len(sensors)} sensors, {len(combos)} combos, "
           f"{len(targets)} library targets\n")
 
-    n_err = n_warn = 0
+    n_err = n_warn = n_filed = 0
     entries = sorted(d for d in os.listdir(args.staging)
                      if not d.startswith(".")
                      and os.path.isdir(os.path.join(args.staging, d)))
     for sname in entries:
-        errors, warnings, infos = check_session(
-            os.path.join(args.staging, sname), sname,
-            targets, scopes, sensors, combos, args.library)
+        spath = os.path.join(args.staging, sname)
+        errors, warnings, infos, dest = check_session(
+            spath, sname, targets, reg_targets,
+            scopes, sensors, combos, args.library)
         verdict = "FAIL" if errors else ("WARN" if warnings else "OK")
         print(f"[{verdict}] {sname}")
         for e in errors:
@@ -245,7 +274,20 @@ def main() -> None:
         n_err += len(errors)
         n_warn += len(warnings)
 
-    print(f"\n{len(entries)} folder(s): {n_err} error(s), {n_warn} warning(s)")
+        if args.apply and dest and not errors and (not warnings or args.force):
+            tdir = os.path.join(args.library, dest)
+            os.makedirs(tdir, exist_ok=True)
+            shutil.move(spath, os.path.join(tdir, sname))
+            targets[parse_target_folder(dest)["target_id"]] = dest
+            n_filed += 1
+            print(f"    FILED -> {dest}/{sname}")
+
+    summary = f"\n{len(entries)} folder(s): {n_err} error(s), {n_warn} warning(s)"
+    if args.apply:
+        summary += f", {n_filed} filed"
+        if n_filed:
+            summary += " — run refresh.py to pick them up"
+    print(summary)
     sys.exit(1 if n_err else 0)
 
 
