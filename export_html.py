@@ -190,7 +190,11 @@ def main():
         return rows(f"""SELECT s.target_id, t.common_name, s.scope, s.sensor,
                               s.session_date, s.lights_kept AS lights,
                               s.lights_rejected AS rejected,
-                              ROUND(s.integration_s/3600.0,2) AS hours
+                              ROUND(s.integration_s/3600.0,2) AS hours,
+                              (SELECT COUNT(*) FROM frames f
+                               WHERE f.session_id=s.session_id AND f.frame_type='light'
+                                 AND NOT f.is_rejected
+                                 AND (f.hfr>3.0 OR f.rms_arcsec>1.5)) AS qc_flags
                        FROM sessions s JOIN targets t USING(target_id)
                        JOIN v_session_pipeline vp ON vp.session_id=s.session_id
                        WHERE NOT s.is_other_capture AND vp.furthest_stage='{stage}'
@@ -408,7 +412,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="scroll"><table id="sessionsTable"></table></div>
 </div>
 
-<div class="panel"><h2>Calibration status</h2><div class="scroll"><div id="calibration"></div></div></div>
+<div class="panel"><h2>Calibration status</h2>
+  <div id="calSummary" class="sub" style="margin-bottom:8px"></div>
+  <div style="margin-bottom:10px"><input type="search" id="calfilter" placeholder="filter by class, rig, status..."></div>
+  <div class="scroll"><table id="calTable"></table></div>
+</div>
 
 <div class="panel">
   <h2>Quality-control candidates</h2>
@@ -632,7 +640,7 @@ function sortableTable(tblEl, cols, data, opts){
 (function(){
   const WL = D.worklists || {};
   const SPEC = {
-    cull:      {label:"To cull",      cols:[["common_name","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rej.","num"],["hours","Hrs","num"]]},
+    cull:      {label:"To cull",      cols:[["common_name","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rej.","num"],["qc_flags","QC flags","num"],["hours","Hrs","num"]]},
     integrate: {label:"To integrate", cols:[["common_name","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hrs","num"]]},
     edit:      {label:"To edit",      cols:[["common_name","Target"],["image","Image"],["type","Type"],["hours","Hrs","num"],["method","Method"]]},
     restack:   {label:"Restack",      cols:[["common_name","Target"],["folder_name","Integration"],["built_hours","Built","num"],["available_hours","Avail","num"],["behind","Behind h","num"]]},
@@ -704,15 +712,24 @@ function sortableTable(tblEl, cols, data, opts){
     if(s && s.startsWith('N/A')) return '<span class="pill na">N/A</span>';
     return s||'';
   }
-  document.getElementById("calibration").innerHTML =
-    "<table><thead><tr><th>Class</th><th>Rig</th><th>Temp</th><th>Gain</th>"+
-    "<th>Exp</th><th>Raw sets</th><th>Raw frames</th><th>Master</th><th>Status</th>"+
-    "</tr></thead><tbody>" +
-    D.calibration.map(r=>`<tr><td>${r.class}</td><td>${r.rig}</td>`+
-      `<td class="num">${r.temp??''}</td><td class="num">${r.gain??''}</td>`+
-      `<td class="num">${r.exp??''}</td><td class="num">${r.raw_sets}</td>`+
-      `<td class="num">${r.raw_frames}</td><td>${r.master_date}</td>`+
-      `<td>${pill(r.status)}</td></tr>`).join("") + "</tbody></table>";
+  // coverage summary
+  const cal = D.calibration||[];
+  const c = s => cal.filter(r=>r.status===s || (s==='STALE'&&(r.status||'').startsWith('STALE'))).length;
+  const toBuild=c('NO MASTER'), stale=c('STALE'), ok=c('OK'), na=c('N/A (per-session)');
+  document.getElementById("calSummary").innerHTML =
+    `<span class="pill todo">${toBuild} to build</span> `+
+    (stale?`<span class="pill warn">${stale} stale</span> `:"")+
+    (ok?`<span class="pill good">${ok} covered</span> `:"")+
+    `<span class="pill na">${na} per-session flats</span> `+
+    `&nbsp; (Bias/Dark configs across your library; drop a master*.xisf in a set's folder to clear it.)`;
+  const fbox = document.getElementById("calfilter");
+  const draw = sortableTable(document.getElementById("calTable"),
+    [["class","Class"],["rig","Rig"],["temp","Temp","num"],["gain","Gain","num"],
+     ["exp","Exp","num"],["raw_sets","Raw sets","num"],["raw_frames","Raw frames","num"],
+     ["master_date","Master"],["status","Status",null,r=>pill(r.status)]],
+    cal, {sortKey:"status",sortDir:1,getFilter:()=>fbox.value});
+  draw("");
+  fbox.oninput = ()=>draw(fbox.value);
 })();
 
 // ---- QC ----
