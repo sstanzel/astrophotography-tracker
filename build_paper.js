@@ -101,11 +101,10 @@ children.push(new Paragraph({ alignment: AlignmentType.CENTER,
 children.push(new Paragraph({ alignment: AlignmentType.CENTER,
   children: [new TextRun({ text: `Steve Stanzel  ·  ${STATS.asOf}  ·  revision 2, for peer review`, font: ARIAL, size: 22, color: "555555" })],
   spacing: { after: 120 } }));
-// Contact for circulated copies. Before the repo goes public, consider
-// swapping the personal address for a purpose alias on the domain (e.g.
-// astro@stanzel.com) — addresses committed to public GitHub get scraped.
+// Contact for circulated copies. Deliberately the old catch-all commercial
+// address (not the personal one) — fine to be public/scraped.
 children.push(new Paragraph({ alignment: AlignmentType.CENTER,
-  children: [new TextRun({ text: "425.444.3552  ·  steve@stanzel.com", font: ARIAL, size: 20, color: "555555" })],
+  children: [new TextRun({ text: "425.444.3552  ·  sstanzel@hotmail.com", font: ARIAL, size: 20, color: "555555" })],
   spacing: { after: 840 } }));
 
 // ---- Abstract -----------------------------------------------------------
