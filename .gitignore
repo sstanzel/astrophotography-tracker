@@ -14,3 +14,6 @@ venv/
 # --- macOS / editor cruft ---
 .DS_Store
 .Rhistory
+node_modules/
+package.json
+package-lock.json
