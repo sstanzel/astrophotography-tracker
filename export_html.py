@@ -225,6 +225,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   th:hover { color:var(--accent); }
   tr:hover td { background:var(--panel2); }
   td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tr.trow { cursor:pointer; }
+  td.tog { width:1.4em; text-align:center; color:var(--muted); }
+  tr.detail td { background:var(--panel2); padding:4px 8px; }
+  table.mini { width:100%; font-size:.92em; margin:2px 0; }
+  table.mini th { position:static; background:transparent; }
   .bar { background:var(--panel2); border-radius:4px; height:16px;
          position:relative; overflow:hidden; min-width:120px; }
   .bar > span { position:absolute; left:0; top:0; bottom:0;
@@ -276,7 +281,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="panel">
   <h2>Targets</h2>
-  <div class="sub" style="margin-bottom:8px">Totals per target; expand detail in the Sessions table below.</div>
+  <div class="sub" style="margin-bottom:8px">Totals per target — click a row to expand its sessions.</div>
+  <div style="margin-bottom:10px"><input type="search" id="tfilter" placeholder="filter by target or name..."></div>
   <div class="scroll"><table id="targetsTable"></table></div>
 </div>
 
@@ -419,25 +425,61 @@ stageTable("sessionPipeline", D.sessionPipeline);
     }).join("") + "</tbody></table>";
 })();
 
-// ---- targets table (per-target totals) ----
+// ---- targets table (totals; expandable sessions; filter + sort) ----
 (function(){
-  const rows = D.targetRollup || [];
-  const span = r => (r.first_date && r.last_date)
-    ? (r.first_date===r.last_date ? r.first_date : r.first_date+" → "+r.last_date) : "";
-  document.getElementById("targetsTable").innerHTML =
-    "<thead><tr><th>Target</th><th>Sessions</th><th>Lights</th>"+
-    "<th>Hrs</th><th>Dates</th><th>Goal</th><th>Progress</th></tr></thead><tbody>"+
-    rows.map(r=>{
-      const prog = (r.goal_hours>0)
-        ? `<div class="bar"><span style="width:${r.goal_pct}%"></span></div> ${r.goal_pct}%` : "";
-      return `<tr><td>${r.common_name||r.target_id}</td>`+
-        `<td class="num">${r.sessions}</td>`+
-        `<td class="num">${r.lights}</td>`+
-        `<td class="num">${r.hours.toFixed(1)}</td>`+
-        `<td>${span(r)}</td>`+
-        `<td class="num">${r.goal_hours??""}</td>`+
-        `<td>${prog}</td></tr>`;
-    }).join("") + "</tbody>";
+  const cols = [
+    ["target_id","Target"],["common_name","Name"],["sessions","Sessions","num"],
+    ["lights","Lights","num"],["hours","Hrs","num"],["dates","Dates"],
+    ["goal_hours","Goal","num"],["goal_pct","Progress","num"],
+  ];
+  // child session detail columns (same labels as the Sessions table)
+  const SCOLS = [["session_date","Date"],["scope","Scope"],["sensor","Sensor"],
+    ["lights","Lights","num"],["rejected","Rej.","num"],["hours","Hrs","num"],
+    ["stage","Stage"],["method","Method"]];
+  const byTarget = {};
+  (D.sessions||[]).forEach(s=>{(byTarget[s.target_id]=byTarget[s.target_id]||[]).push(s);});
+  const data = (D.targetRollup||[]).map(r=>({...r,
+    dates:(r.first_date&&r.last_date)
+      ? (r.first_date===r.last_date? r.first_date : r.first_date+" → "+r.last_date) : ""}));
+  let sortKey="hours", sortDir=-1;
+  const open = new Set();
+  const tbl = document.getElementById("targetsTable");
+  const detail = tid => {
+    const ss=(byTarget[tid]||[]).slice().sort((a,b)=>a.session_date<b.session_date?1:-1);
+    if(!ss.length) return `<tr class="detail"><td colspan="${cols.length+1}" class="sub">no sessions yet</td></tr>`;
+    return `<tr class="detail"><td></td><td colspan="${cols.length}"><table class="mini"><thead><tr>`+
+      SCOLS.map(c=>`<th>${c[1]}</th>`).join("")+"</tr></thead><tbody>"+
+      ss.map(s=>"<tr>"+SCOLS.map(c=>`<td class="${c[2]==='num'?'num':''}">${s[c[0]]??''}</td>`).join("")+"</tr>").join("")+
+      "</tbody></table></td></tr>";
+  };
+  function render(filter){
+    let rows=data.slice();
+    if(filter){const f=filter.toLowerCase();
+      rows=rows.filter(r=>((r.target_id||"")+" "+(r.common_name||"")).toLowerCase().includes(f));}
+    rows.sort((a,b)=>{let x=a[sortKey],y=b[sortKey];
+      if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1;
+      if(x<y)return -sortDir; if(x>y)return sortDir; return 0;});
+    tbl.innerHTML="<thead><tr><th></th>"+cols.map(c=>`<th data-k="${c[0]}">${c[1]}`+
+      (sortKey===c[0]?(sortDir>0?" ▲":" ▼"):"")+"</th>").join("")+"</tr></thead><tbody>"+
+      rows.map(r=>{
+        const isOpen=open.has(r.target_id), nSess=(byTarget[r.target_id]||[]).length;
+        const prog=(r.goal_hours>0)?`<div class="bar"><span style="width:${r.goal_pct}%"></span></div> ${r.goal_pct}%`:"";
+        const cell=c=> c[0]==="hours" ? r.hours.toFixed(1)
+                     : c[0]==="goal_pct" ? prog
+                     : (r[c[0]]??"");
+        const main=`<tr class="trow" data-t="${r.target_id}"><td class="tog">${nSess?(isOpen?"▾":"▸"):""}</td>`+
+          cols.map(c=>`<td class="${c[2]==='num'?'num':''}">${cell(c)}</td>`).join("")+"</tr>";
+        return main+(isOpen?detail(r.target_id):"");
+      }).join("")+"</tbody>";
+    tbl.querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{
+      const k=th.dataset.k; if(k===sortKey)sortDir=-sortDir; else{sortKey=k;sortDir=(k==="target_id"||k==="common_name")?1:-1;}
+      render(document.getElementById("tfilter").value);});
+    tbl.querySelectorAll("tr.trow").forEach(tr=>tr.onclick=()=>{
+      const t=tr.dataset.t; open.has(t)?open.delete(t):open.add(t);
+      render(document.getElementById("tfilter").value);});
+  }
+  render("");
+  document.getElementById("tfilter").oninput=e=>render(e.target.value);
 })();
 
 // ---- progress bars ----

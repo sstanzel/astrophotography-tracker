@@ -181,13 +181,15 @@ def main() -> None:
         print("DRY RUN — nothing copied. Re-run with --apply.")
         return
 
-    copied = 0
+    total, copied = len(pending), 0
     for src, dst, present in plan:
         if present:
             continue
+        copied += 1
+        mb = os.path.getsize(src) / (1024 * 1024)
+        print(f"  [{copied}/{total}] {os.path.basename(src)} ({mb:.0f} MB)…", flush=True)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
-        copied += 1
     print(f"Copied {copied} keeper(s) into their Results folders.")
 
 
