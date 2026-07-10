@@ -128,9 +128,6 @@ def main():
                    ROUND(COALESCE(SUM(s.integration_s),0)/3600.0,2) AS hours,
                    MIN(s.session_date) AS first_date,
                    MAX(s.session_date) AS last_date,
-                   (SELECT GROUP_CONCAT(DISTINCT scope||' '||sensor)
-                      FROM sessions WHERE target_id=t.target_id
-                        AND NOT is_other_capture) AS rigs,
                    g.goal_hours,
                    CASE WHEN g.goal_hours>0 THEN MIN(100,
                         ROUND(100.0*COALESCE(SUM(s.integration_s),0)/3600.0/g.goal_hours))
@@ -428,14 +425,13 @@ stageTable("sessionPipeline", D.sessionPipeline);
   const span = r => (r.first_date && r.last_date)
     ? (r.first_date===r.last_date ? r.first_date : r.first_date+" → "+r.last_date) : "";
   document.getElementById("targetsTable").innerHTML =
-    "<thead><tr><th>Target</th><th>Sessions</th><th>Rigs</th><th>Lights</th>"+
+    "<thead><tr><th>Target</th><th>Sessions</th><th>Lights</th>"+
     "<th>Hrs</th><th>Dates</th><th>Goal</th><th>Progress</th></tr></thead><tbody>"+
     rows.map(r=>{
       const prog = (r.goal_hours>0)
         ? `<div class="bar"><span style="width:${r.goal_pct}%"></span></div> ${r.goal_pct}%` : "";
       return `<tr><td>${r.common_name||r.target_id}</td>`+
         `<td class="num">${r.sessions}</td>`+
-        `<td>${r.rigs||""}</td>`+
         `<td class="num">${r.lights}</td>`+
         `<td class="num">${r.hours.toFixed(1)}</td>`+
         `<td>${span(r)}</td>`+
