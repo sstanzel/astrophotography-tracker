@@ -176,6 +176,81 @@ def main():
         }
     else:
         data["validation"] = {"summary": [], "findings": []}
+
+    # ---- Work Queue: one worklist per next-action ----
+    def sess_at(stage):
+        # stage is a trusted literal ('1 Captured' etc.), not user input.
+        return rows(f"""SELECT s.target_id, t.common_name, s.scope, s.sensor,
+                              s.session_date, s.lights_kept AS lights,
+                              s.lights_rejected AS rejected,
+                              ROUND(s.integration_s/3600.0,2) AS hours
+                       FROM sessions s JOIN targets t USING(target_id)
+                       JOIN v_session_pipeline vp ON vp.session_id=s.session_id
+                       WHERE NOT s.is_other_capture AND vp.furthest_stage='{stage}'
+                       ORDER BY s.session_date DESC""")
+    edit_rows = rows("""
+        SELECT t.common_name, (s.session_date||'  '||s.scope||' '||s.sensor) AS image,
+               'session' AS type, ROUND(s.integration_s/3600.0,2) AS hours,
+               COALESCE(s.integration_method,'') AS method
+        FROM sessions s JOIN targets t USING(target_id)
+        WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
+        UNION ALL
+        SELECT t.common_name, i.folder_name AS image, 'integration' AS type,
+               ROUND(SUM(mem.integration_s)/3600.0,2) AS hours,
+               COALESCE(i.integration_method,'') AS method
+        FROM integrations i JOIN targets t USING(target_id)
+        LEFT JOIN (SELECT im.integration_id, s.integration_s FROM integration_members im
+                   JOIN sessions s ON s.session_id=im.session_id) mem
+             ON mem.integration_id=i.integration_id
+        WHERE i.stage_edit<2 GROUP BY i.integration_id
+        ORDER BY hours DESC""") if has_integrations else sess_at("__none__")
+    data["worklists"] = {
+        "cull": sess_at("1 Captured"),
+        "integrate": sess_at("2 Culled"),
+        "edit": edit_rows,
+        "restack": rows("""SELECT common_name, folder_name,
+                                  COALESCE(built_hours,0) AS built_hours,
+                                  COALESCE(available_hours,0) AS available_hours,
+                                  ROUND(COALESCE(available_hours,0)-COALESCE(built_hours,0),2) AS behind
+                           FROM v_integration_overview WHERE is_stale=1
+                           ORDER BY behind DESC""") if has_integrations else [],
+        "capture": rows("""
+            SELECT t.common_name,
+                   ROUND(COALESCE(SUM(s.integration_s),0)/3600.0,1) AS hours,
+                   g.goal_hours AS goal,
+                   ROUND(g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0,1) AS gap,
+                   g.priority
+            FROM targets t
+            LEFT JOIN sessions s ON s.target_id=t.target_id AND NOT s.is_other_capture
+            LEFT JOIN target_goals g ON g.target_id=t.target_id
+            WHERE NOT t.is_other_capture
+            GROUP BY t.target_id
+            HAVING (g.goal_hours IS NOT NULL AND hours < g.goal_hours)
+                OR COUNT(s.session_id)=0
+            ORDER BY g.priority, gap DESC"""),
+        "masters": rows("""SELECT class, camera, temperature_c AS temp, gain,
+                                  exp_s AS exp, frame_count AS frames
+                           FROM calibration_masters
+                           WHERE class IN ('bias','dark') AND is_generated_master=0
+                           ORDER BY class, camera, temperature_c, gain, exp_s"""),
+    }
+
+    # ---- Publish / Print ledgers + unpublished candidates ----
+    data["published"] = rows("""
+        SELECT p.target_id, t.common_name, p.kind, p.url, p.title, p.published_at,
+               COALESCE(i.folder_name, s.folder_path, '') AS image
+        FROM publications p JOIN targets t USING(target_id)
+        LEFT JOIN integrations i ON i.integration_id=p.integration_id
+        LEFT JOIN sessions s ON s.session_id=p.session_id
+        WHERE p.kind IN ('astrobin','social','other')
+        ORDER BY p.published_at DESC, t.common_name""")
+    data["printed"] = rows("""
+        SELECT p.target_id, t.common_name, p.title, p.published_at,
+               COALESCE(i.folder_name, s.folder_path, '') AS image
+        FROM publications p JOIN targets t USING(target_id)
+        LEFT JOIN integrations i ON i.integration_id=p.integration_id
+        LEFT JOIN sessions s ON s.session_id=p.session_id
+        WHERE p.kind='print' ORDER BY p.published_at DESC, t.common_name""")
     con.close()
 
     html = HTML_TEMPLATE.replace("/*DATA*/", json.dumps(data))
@@ -236,6 +311,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 background:var(--accent2); }
   .pill { display:inline-block; padding:2px 8px; border-radius:10px;
           font-size:11px; font-weight:600; }
+  .chip { display:inline-block; padding:5px 12px; margin:0 6px 6px 0; cursor:pointer;
+          border-radius:14px; background:var(--panel2); color:var(--fg);
+          font-size:13px; border:1px solid transparent; user-select:none; }
+  .chip.on { background:var(--accent2); color:#0b1020; font-weight:700; }
+  .chip .n { opacity:.7; margin-left:5px; }
   .pill.bad{ background:#3a2420; color:var(--bad); }
   .pill.warn{ background:#3a3020; color:var(--warn); }
   .pill.good{ background:#1f3329; color:var(--good); }
@@ -255,6 +335,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </header>
 
 <div class="grid kpis" id="kpis"></div>
+
+<div class="panel">
+  <h2>Work Queue</h2>
+  <div class="sub" style="margin-bottom:8px">What's next — pick an action, then filter/sort the list.</div>
+  <div id="wqChips" style="margin-bottom:10px"></div>
+  <div style="margin-bottom:10px"><input type="search" id="wqfilter" placeholder="filter this list..."></div>
+  <div class="scroll"><table id="wqTable"></table></div>
+</div>
+
+<div class="grid two">
+  <div class="panel"><h2>Published</h2><div class="scroll"><table id="pubTable"></table></div></div>
+  <div class="panel"><h2>Printed</h2><div class="scroll"><table id="printTable"></table></div></div>
+</div>
 
 <div class="panel" id="healthPanel">
   <h2>Data health</h2>
@@ -480,6 +573,72 @@ stageTable("sessionPipeline", D.sessionPipeline);
   }
   render("");
   document.getElementById("tfilter").oninput=e=>render(e.target.value);
+})();
+
+// ---- generic sortable + filterable table ----
+function sortableTable(tblEl, cols, data, opts){
+  opts = opts || {};
+  let sortKey = opts.sortKey || cols[0][0], sortDir = opts.sortDir || 1;
+  function draw(filter){
+    let rows = (data||[]).slice();
+    if(filter){ const f=filter.toLowerCase();
+      rows = rows.filter(r=>cols.some(c=>String(r[c[0]]??"").toLowerCase().includes(f))); }
+    rows.sort((a,b)=>{let x=a[sortKey],y=b[sortKey];
+      if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1;
+      if(typeof x==="number"&&typeof y==="number"){} else {x=String(x);y=String(y);}
+      if(x<y)return -sortDir; if(x>y)return sortDir; return 0;});
+    tblEl.innerHTML = "<thead><tr>"+cols.map(c=>`<th data-k="${c[0]}">${c[1]}`+
+        (sortKey===c[0]?(sortDir>0?" ▲":" ▼"):"")+"</th>").join("")+"</tr></thead><tbody>"+
+      (rows.length? rows.map(r=>"<tr>"+cols.map(c=>{
+        const v=r[c[0]]; const cell = (c[3]&&c[3](r)!=null)?c[3](r):(v??"");
+        return `<td class="${c[2]==='num'?'num':''}">${cell}</td>`;}).join("")+"</tr>").join("")
+        : `<tr><td colspan="${cols.length}" class="sub">nothing here — all clear</td></tr>`)+
+      "</tbody>";
+    tblEl.querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{
+      const k=th.dataset.k; if(k===sortKey)sortDir=-sortDir; else{sortKey=k;sortDir=1;}
+      draw(opts.getFilter?opts.getFilter():"");});
+  }
+  return draw;
+}
+
+// ---- Work Queue ----
+(function(){
+  const WL = D.worklists || {};
+  const SPEC = {
+    cull:      {label:"To cull",      cols:[["common_name","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rej.","num"],["hours","Hrs","num"]]},
+    integrate: {label:"To integrate", cols:[["common_name","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hrs","num"]]},
+    edit:      {label:"To edit",      cols:[["common_name","Target"],["image","Image"],["type","Type"],["hours","Hrs","num"],["method","Method"]]},
+    restack:   {label:"Restack",      cols:[["common_name","Target"],["folder_name","Integration"],["built_hours","Built","num"],["available_hours","Avail","num"],["behind","Behind h","num"]]},
+    capture:   {label:"Capture more", cols:[["common_name","Target"],["hours","Hrs","num"],["goal","Goal","num"],["gap","Gap","num"],["priority","Prio","num"]]},
+    masters:   {label:"Build masters",cols:[["class","Class"],["camera","Camera"],["temp","Temp","num"],["gain","Gain","num"],["exp","Exp s","num"],["frames","Frames","num"]]},
+  };
+  const order = ["cull","integrate","edit","restack","capture","masters"];
+  let action = order.find(a=>(WL[a]||[]).length) || "cull";
+  const chipsEl = document.getElementById("wqChips");
+  const tbl = document.getElementById("wqTable");
+  const fbox = document.getElementById("wqfilter");
+  let draw = null;
+  function build(){
+    chipsEl.innerHTML = order.map(a=>`<span class="chip ${a===action?'on':''}" data-a="${a}">`+
+      `${SPEC[a].label}<span class="n">${(WL[a]||[]).length}</span></span>`).join("");
+    chipsEl.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{action=ch.dataset.a; fbox.value=""; build();});
+    draw = sortableTable(tbl, SPEC[action].cols, WL[action]||[], {getFilter:()=>fbox.value});
+    draw("");
+  }
+  fbox.oninput = ()=>{ if(draw) draw(fbox.value); };
+  build();
+})();
+
+// ---- publish / print ledgers ----
+(function(){
+  const link = r => r.url ? `<a href="${r.url}" target="_blank">${r.title||r.url}</a>` : (r.title||"");
+  sortableTable(document.getElementById("pubTable"),
+    [["common_name","Target"],["image","Image"],["kind","Where"],
+     ["title","Link",null,link],["published_at","Date"]],
+    D.published||[], {sortKey:"published_at",sortDir:-1})("");
+  sortableTable(document.getElementById("printTable"),
+    [["common_name","Target"],["image","Image"],["title","Print"],["published_at","Date"]],
+    D.printed||[], {sortKey:"published_at",sortDir:-1})("");
 })();
 
 // ---- progress bars ----
