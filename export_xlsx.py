@@ -90,9 +90,9 @@ def main():
     has_integrations = has_table("integrations")
     has_validation = has_table("validation_findings")
 
-    STAGE_TEXT = {0: "0 Planned", 1: "1 Captured", 2: "2 Blink/Reject",
-                  3: "3 Calibrated", 4: "4 Integrated", 5: "5 Edited",
-                  6: "6 Published", 7: "7 Printed"}
+    STAGE_TEXT = {0: "0 Planned", 1: "1 Captured", 2: "2 Culled",
+                  3: "3 Integrated", 4: "4 Edited", 5: "5 Published",
+                  6: "6 Printed"}
 
     # ---------------------------------------------------------------- Sessions
     ws = wb.active
@@ -103,9 +103,8 @@ def main():
     # S OtherCapture T FolderPath
     s_headers = ["Library", "Target ID", "Catalog", "Common Name", "Scope", "Sensor",
                  "Session Date", "Year", "Lights", "Rejected", "Flats", "Dark Flats",
-                 "Darks", "Bias", "Integration (hrs)", "PI Magic Studio",
-                 "Capture", "Blink/Reject",
-                 "Calibrate", "Other Capture", "Integrate", "Edit", "Publish",
+                 "Darks", "Bias", "Integration (hrs)", "Stage", "Method",
+                 "Culled", "Other Capture", "Integrate", "Edit", "Publish",
                  "Print", "AstroBin URL", "Folder Path"]
     s_rows = []
     for r in cur.execute("""
@@ -113,11 +112,11 @@ def main():
                s.session_date, s.lights_kept, s.lights_rejected, s.flats_count,
                s.dark_flats_count, s.darks_count, s.bias_count,
                ROUND(s.integration_s/3600.0, 2) AS hrs,
-               s.pi_magic_studio, s.pi_magic_machine,
-               s.stage_capture, s.stage_blink_reject, s.stage_calibrate,
-               s.stage_integrate, s.stage_edit, s.stage_publish, s.stage_print,
-               s.astrobin_url, s.is_other_capture, s.folder_path
+               vp.furthest_stage AS stage, COALESCE(s.integration_method,'') AS method,
+               s.stage_culled, s.stage_integrate, s.stage_edit, s.stage_publish,
+               s.stage_print, s.astrobin_url, s.is_other_capture, s.folder_path
         FROM sessions s JOIN targets t USING (target_id)
+        JOIN v_session_pipeline vp ON vp.session_id = s.session_id
         ORDER BY s.session_date, s.target_id"""):
         year = int(r["session_date"][:4]) if r["session_date"] else None
         s_rows.append([
@@ -125,9 +124,8 @@ def main():
             r["scope"], r["sensor"], r["session_date"], year, r["lights_kept"],
             r["lights_rejected"], r["flats_count"], r["dark_flats_count"],
             r["darks_count"], r["bias_count"], r["hrs"],
-            (r["pi_magic_machine"] or ("Yes" if r["pi_magic_studio"] else "")),
-            stage_text(r["stage_capture"]), stage_text(r["stage_blink_reject"]),
-            stage_text(r["stage_calibrate"]),
+            r["stage"], r["method"],
+            stage_text(r["stage_culled"]),
             "Yes" if r["is_other_capture"] else "No",
             stage_text(r["stage_integrate"]), stage_text(r["stage_edit"]),
             stage_text(r["stage_publish"]), stage_text(r["stage_print"]),
@@ -283,7 +281,7 @@ def main():
                    COALESCE(built_hours, 0) AS built_hours,
                    COALESCE(available_hours, 0) AS available_hours,
                    goal_hours, sessions_built, sessions_available,
-                   data_through, COALESCE(built_machine, '') AS machine,
+                   data_through, COALESCE(integration_method, '') AS method,
                    is_stale, furthest_stage
             FROM v_integration_overview ORDER BY target_id, folder_name"""):
             pct = (round(100.0 * r["available_hours"] / r["goal_hours"])
@@ -294,13 +292,13 @@ def main():
                            r["rig"], r["span"],
                            r["built_hours"], r["available_hours"], r["goal_hours"],
                            pct, r["sessions_built"], r["sessions_available"],
-                           r["data_through"], r["machine"], state,
+                           r["data_through"], r["method"], state,
                            r["furthest_stage"], r["folder_name"]])
     n_integ = len(i_rows)
     wi = wb.create_sheet("Integrations")
     i_headers = ["Target", "Kind", "Rig", "Span", "Built (hrs)", "Available (hrs)",
                  "Goal (hrs)", "Progress %", "Sessions Built", "Sessions Available",
-                 "Data Through", "Machine", "State", "Stage", "Folder"]
+                 "Data Through", "Method", "State", "Stage", "Folder"]
     write_sheet(wi, i_headers,
                 i_rows or [["(no multi-session integrations yet)"] + [""] * 14],
                 col_formats={5: "0.00", 6: "0.00", 7: "0.00", 8: "0",

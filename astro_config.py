@@ -60,6 +60,11 @@ def load_libraries(config_path=None):
                 current = {}
                 blocks.append(current)
                 continue
+            if line.startswith("["):
+                # A different section (e.g. [mirror]) — stop capturing keys into
+                # the last library block, otherwise its path gets overwritten.
+                current = None
+                continue
             m = re.match(r'(\w+)\s*=\s*"(.*?)"\s*(?:#.*)?$', line)
             if m and current is not None:
                 current[m.group(1)] = m.group(2)

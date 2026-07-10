@@ -141,8 +141,7 @@ def read_notes_toml(session_path, session_name):
     for a session's {name} notes.toml. Regex parse — zero dependencies."""
     out = dict(present=False, location=None, moon_phase=None,
                moon_illumination=None, moon_age_days=None,
-               edited=False, published=False, printed=False, astrobin_url=None,
-               pi_magic_studio=False, pi_magic_machine=None, pi_magic_date=None)
+               edited=False, published=False, printed=False, astrobin_url=None)
     p = os.path.join(session_path, f"{session_name} notes.toml")
     if not os.path.isfile(p):
         return out
@@ -169,17 +168,40 @@ def read_notes_toml(session_path, session_name):
     m = re.search(r'^moon_age_days\s*=\s*([0-9.]+)', txt, re.M)
     if m:
         out["moon_age_days"] = float(m.group(1))
-    # PI Magic Studio initial-processing markers (any section; flat regex).
-    fm = re.search(r'^\s*pi_magic_studio\s*=\s*(true|false)', txt, re.M | re.I)
-    out["pi_magic_studio"] = bool(fm) and fm.group(1).lower() == "true"
-    m = re.search(r'^\s*pi_magic_machine\s*=\s*"([^"]*)"', txt, re.M)
-    if m and m.group(1):
-        out["pi_magic_machine"] = m.group(1)
-        out["pi_magic_studio"] = True   # a named machine implies it was run
-    m = re.search(r'^\s*pi_magic_date\s*=\s*"([^"]*)"', txt, re.M)
-    if m and m.group(1):
-        out["pi_magic_date"] = m.group(1)
     return out
+
+
+def detect_method(container_path):
+    """Return how a session/integration was stacked, from its working folders.
+
+    'PI Magic' or 'PixInsight' when the matching working folder still holds
+    files (PI Magic wins if both do); 'other' when the Results folder has files
+    but the working folders are empty (e.g. already cleaned); None when nothing
+    indicates it was integrated. Callers persist a specific method so it survives
+    a later cleanup.
+
+    Args:
+        container_path: absolute path of the session or integration folder.
+
+    Returns:
+        'PI Magic' | 'PixInsight' | 'other' | None.
+    """
+    def has_files(sub):
+        p = os.path.join(container_path, sub)
+        if not os.path.isdir(p):
+            return False
+        for _r, _d, files in os.walk(p):
+            if any(f != ".DS_Store" and not f.startswith("._") for f in files):
+                return True
+        return False
+
+    if has_files("PI Magic"):
+        return "PI Magic"
+    if has_files("PI Process"):
+        return "PixInsight"
+    if has_files(f"{os.path.basename(container_path)} Results"):
+        return "other"
+    return None
 
 
 def span_matches(date, span):
@@ -277,7 +299,6 @@ def read_integration_toml(path):
         "exclude": arr("exclude"),
         "members": arr("members"),           # legacy explicit list
         "built_sessions": arr("sessions"),   # [built].sessions
-        "built_machine": s("built_machine"),
         "kind": s("kind"),
         "version": i("version") or 1,
         "edited": b("edited"),
@@ -323,22 +344,21 @@ SESSION_NEW_COLS = [
     ("fits_site_lat",       "REAL"),
     ("fits_site_lon",       "REAL"),
     ("fits_instrument",     "TEXT"),
-    ("stage_integrate",     "INTEGER DEFAULT 0"),   # 4 — single-session integration
-    ("stage_edit",          "INTEGER DEFAULT 0"),   # 5
-    ("stage_publish",       "INTEGER DEFAULT 0"),   # 6
-    ("stage_print",         "INTEGER DEFAULT 0"),   # 7
+    ("stage_culled",        "INTEGER DEFAULT 0"),   # 2 Culled
+    ("stage_integrate",     "INTEGER DEFAULT 0"),   # 3 Integrated (single-session)
+    ("stage_edit",          "INTEGER DEFAULT 0"),   # 4 Edited
+    ("stage_publish",       "INTEGER DEFAULT 0"),   # 5 Published
+    ("stage_print",         "INTEGER DEFAULT 0"),   # 6 Printed
+    ("integration_method",  "TEXT"),                # PixInsight|PI Magic|other
     ("astrobin_url",        "TEXT"),
-    ("pi_magic_studio",     "INTEGER DEFAULT 0"),   # 1 if run in PI Magic Studio
-    ("pi_magic_machine",    "TEXT"),                # which PC ran it
-    ("pi_magic_date",       "TEXT"),                # YYYY-MM-DD (optional)
 ]
 
 # Columns added to the integrations table on an existing DB (no-op on a fresh
 # one). The CHECK on membership_mode lives in schema.sql for new DBs only.
 INTEGRATION_NEW_COLS = [
-    ("membership_mode", "TEXT NOT NULL DEFAULT 'auto'"),
-    ("goal_hours",      "REAL"),
-    ("built_machine",   "TEXT"),
+    ("membership_mode",    "TEXT NOT NULL DEFAULT 'auto'"),
+    ("goal_hours",         "REAL"),
+    ("integration_method", "TEXT"),
 ]
 
 # frames table rebuild — used by apply_migrations when an old DB's grammar CHECK
@@ -471,7 +491,7 @@ def apply_migrations(con):
             session_count    INTEGER NOT NULL DEFAULT 0,
             membership_mode  TEXT NOT NULL DEFAULT 'auto',
             goal_hours       REAL,
-            built_machine    TEXT,
+            integration_method TEXT,
             stage_integrate  INTEGER NOT NULL DEFAULT 2,
             stage_edit       INTEGER NOT NULL DEFAULT 0,
             stage_publish    INTEGER NOT NULL DEFAULT 0,
@@ -508,15 +528,15 @@ def apply_migrations(con):
         SELECT
             s.session_id, s.target_id, t.common_name,
             s.scope, s.sensor, s.session_date, s.library_id, s.is_other_capture,
-            s.stage_capture, s.stage_blink_reject, s.stage_calibrate,
+            s.stage_capture, s.stage_culled,
             s.stage_integrate, s.stage_edit, s.stage_publish, s.stage_print,
+            s.integration_method,
             CASE
-              WHEN s.stage_print     = 2 THEN '7 Printed'
-              WHEN s.stage_publish   = 2 THEN '6 Published'
-              WHEN s.stage_edit      = 2 THEN '5 Edited'
-              WHEN s.stage_integrate = 2 THEN '4 Integrated'
-              WHEN s.stage_calibrate = 2 THEN '3 Calibrated'
-              WHEN s.stage_blink_reject = 2 THEN '2 Blink/Reject done'
+              WHEN s.stage_print     = 2 THEN '6 Printed'
+              WHEN s.stage_publish   = 2 THEN '5 Published'
+              WHEN s.stage_edit      = 2 THEN '4 Edited'
+              WHEN s.stage_integrate = 2 THEN '3 Integrated'
+              WHEN s.stage_culled    = 2 THEN '2 Culled'
               WHEN s.stage_capture   = 1 THEN '1 Captured'
               ELSE '0 Planned'
             END AS furthest_stage
@@ -527,7 +547,7 @@ def apply_migrations(con):
         SELECT
             i.integration_id, i.target_id, t.common_name,
             i.kind, i.folder_name, i.scope, i.sensor, i.span, i.version,
-            i.library_id, i.membership_mode, i.goal_hours, i.built_machine,
+            i.library_id, i.membership_mode, i.goal_hours, i.integration_method,
             COUNT(im.session_id)                                    AS sessions_available,
             SUM(COALESCE(im.in_build, 0))                           AS sessions_built,
             ROUND(SUM(s.integration_s) / 3600.0, 2)                AS available_hours,
@@ -537,10 +557,10 @@ def apply_migrations(con):
             CASE WHEN SUM(CASE WHEN im.in_build = 1 THEN 0 ELSE 1 END) > 0 THEN 1 ELSE 0 END
                                                                     AS is_stale,
             CASE
-              WHEN i.stage_print   = 2 THEN '7 Printed'
-              WHEN i.stage_publish = 2 THEN '6 Published'
-              WHEN i.stage_edit    = 2 THEN '5 Edited'
-              ELSE '4 Integrated'
+              WHEN i.stage_print   = 2 THEN '6 Printed'
+              WHEN i.stage_publish = 2 THEN '5 Published'
+              WHEN i.stage_edit    = 2 THEN '4 Edited'
+              ELSE '3 Integrated'
             END AS furthest_stage
         FROM integrations i
         JOIN targets t USING (target_id)
@@ -608,6 +628,94 @@ def populate_vocabularies(con, org_root, log):
         f"{len(names('sensor_values'))} sensors, "
         f"{len(names('scope+sensor_values'))} combos, "
         f"{len(names('filter_values'))} filters")
+
+
+def populate_planned_targets(con, org_root, log):
+    """Create a target row for every registry `target folders/` entry.
+
+    Planned targets (no capture sessions yet) then appear in the tracker at the
+    'Planned' stage. Session-bearing targets are refreshed later by the library
+    walk, so ON CONFLICT DO NOTHING here just seeds the not-yet-imaged ones.
+
+    Args:
+        con: open DB connection.
+        org_root: the _organization folder path.
+        log: logging callable.
+    """
+    reg = os.path.join(org_root, "target folders")
+    if not os.path.isdir(reg):
+        return
+    cur = con.cursor()
+    n = 0
+    for name in sorted(os.listdir(reg)):
+        if name.startswith((".", "_")) or not os.path.isdir(os.path.join(reg, name)):
+            continue
+        tp = parse_target_folder(name)
+        cur.execute("""
+            INSERT INTO targets(target_id, catalog, number, common_name,
+                                folder_name, is_other_capture)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(target_id) DO NOTHING
+        """, (tp["target_id"], tp["catalog"], tp["number"], tp["common_name"],
+              name, tp["is_other"]))
+        n += 1
+    con.commit()
+    log(f"  planned targets: {n} registry entries")
+
+
+def populate_target_goals(con, org_root, log):
+    """Load `target_goals.toml` (array of [[goal]] blocks) into target_goals.
+
+    Each block: target = "<folder name>", hours = <float>, priority = <int?>.
+    The target folder name is resolved to a target_id; goals for unknown targets
+    are skipped. Replaces the table each run (the file is the source of truth).
+
+    Args:
+        con: open DB connection.
+        org_root: the _organization folder path.
+        log: logging callable.
+    """
+    path = os.path.join(org_root, "target_goals.toml")
+    if not os.path.isfile(path):
+        return
+    goals, block = [], None
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line == "[[goal]]":
+                block = {}
+                goals.append(block)
+                continue
+            if line.startswith("["):
+                block = None
+                continue
+            ms = re.match(r'(\w+)\s*=\s*"(.*?)"', line)
+            mn = re.match(r'(\w+)\s*=\s*([\d.]+)', line)
+            if ms and block is not None:
+                block[ms.group(1)] = ms.group(2)
+            elif mn and block is not None:
+                block[mn.group(1)] = float(mn.group(2))
+    cur = con.cursor()
+    cur.execute("DELETE FROM target_goals")
+    n = skipped = 0
+    for g in goals:
+        tname = g.get("target")
+        if not tname:
+            continue
+        tid = parse_target_folder(tname)["target_id"]
+        if not cur.execute("SELECT 1 FROM targets WHERE target_id=?", (tid,)).fetchone():
+            skipped += 1
+            continue
+        cur.execute("""INSERT INTO target_goals(target_id, goal_hours, priority)
+                       VALUES(?,?,?)""",
+                    (tid, g.get("hours"),
+                     int(g["priority"]) if "priority" in g else None))
+        n += 1
+    con.commit()
+    log(f"  target goals: {n} loaded" + (f", {skipped} skipped (unknown target)"
+                                         if skipped else ""))
 
 
 def ingest_library(con, library_id, root, obs, locations, log):
@@ -780,23 +888,27 @@ def ingest_library(con, library_id, root, obs, locations, log):
                          if notes["present"] else None)
 
             # Refresh denormalised counts + validation inputs + notes metadata.
+            method = detect_method(spath)   # PixInsight|PI Magic|other|None
             cur.execute("""
                 UPDATE sessions SET
                   lights_kept=?, lights_rejected=?, flats_count=?, dark_flats_count=?,
                   darks_count=?, bias_count=?, integration_s=?,
                   unparsed_file_count=?, other_image_count=?, results_file_count=?,
-                  notes_toml_present=?, stage_integrate=?,
+                  notes_toml_present=?, stage_culled=?, stage_integrate=?,
                   stage_edit=?, stage_publish=?, stage_print=?, astrobin_url=?,
                   fits_site_lat=?, fits_site_lon=?, fits_instrument=?,
                   mount=?, location_label=?, bortle=?,
                   moon_age_days=?, moon_phase_pct=?, notes_path=?,
-                  pi_magic_studio=?, pi_magic_machine=?, pi_magic_date=?,
+                  integration_method = CASE
+                      WHEN ? IN ('PixInsight','PI Magic') THEN ?
+                      ELSE COALESCE(integration_method, ?) END,
                   updated_at=CURRENT_TIMESTAMP
                 WHERE session_id=?
             """, (counts["light"], rejected, counts["flat"], counts["dark_flat"],
                   counts["dark"], counts["bias"], round(integration_s, 1),
                   unparsed, other_images, results_files,
                   1 if notes["present"] else 0,
+                  2 if rejected > 0 else 0,        # stage_culled: any rejects = culled
                   2 if results_files > 0 else 0,   # stage_integrate: results = done
                   2 if notes["edited"] else 0,
                   2 if notes["published"] else 0,
@@ -805,8 +917,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   hdr["site_lat"], hdr["site_lon"], hdr["instrument"],
                   hdr["telescope"], notes["location"], bortle,
                   notes["moon_age_days"], notes["moon_illumination"], notes_rel,
-                  1 if notes["pi_magic_studio"] else 0,
-                  notes["pi_magic_machine"], notes["pi_magic_date"],
+                  method, method, method,
                   sid))
 
     con.commit()
@@ -1034,10 +1145,11 @@ def ingest_integrations(con, library_id, root, obs, log):
                                   if x != ".DS_Store" and not x.startswith("._"))
 
             sessions_available = sum(1 for s in member_rows.values() if s in avail_set)
+            method = detect_method(ipath)   # PixInsight|PI Magic|other|None
             cur.execute("""
                 INSERT INTO integrations(target_id, library_id, kind, folder_name,
                     folder_path, scope, sensor, span, version, session_count,
-                    membership_mode, goal_hours, built_machine,
+                    membership_mode, goal_hours, integration_method,
                     stage_integrate, stage_edit, stage_publish, stage_print,
                     results_file_count, astrobin_url)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,2,?,?,?,?,?)
@@ -1047,14 +1159,19 @@ def ingest_integrations(con, library_id, root, obs, log):
                   sensor=excluded.sensor, span=excluded.span,
                   version=excluded.version, session_count=excluded.session_count,
                   membership_mode=excluded.membership_mode,
-                  goal_hours=excluded.goal_hours, built_machine=excluded.built_machine,
+                  goal_hours=excluded.goal_hours,
+                  integration_method = CASE
+                      WHEN excluded.integration_method IN ('PixInsight','PI Magic')
+                        THEN excluded.integration_method
+                      ELSE COALESCE(integrations.integration_method,
+                                    excluded.integration_method) END,
                   stage_edit=excluded.stage_edit, stage_publish=excluded.stage_publish,
                   stage_print=excluded.stage_print,
                   results_file_count=excluded.results_file_count,
                   astrobin_url=excluded.astrobin_url, updated_at=CURRENT_TIMESTAMP
             """, (tp["target_id"], library_id, derived_kind, iname, rel, scope, sensor,
                   man["span"], man["version"], sessions_available,
-                  mode, man["goal_hours"], man["built_machine"],
+                  mode, man["goal_hours"], method,
                   2 if man["edited"] else 0, 2 if man["published"] else 0,
                   2 if man["printed"] else 0, rfiles, man["astrobin_url"]))
             iid = cur.execute("SELECT integration_id FROM integrations "
@@ -1365,6 +1482,7 @@ def main():
     if os.path.isdir(org):
         log("Vocabularies:")
         populate_vocabularies(con, org, log)
+        populate_planned_targets(con, org, log)
     locations = load_locations(astro_config.org_path("locations.toml"))
 
     # Structural observations the walk collects for the validate() pass.
@@ -1381,6 +1499,9 @@ def main():
         ingest_library(con, lib["id"], root, obs, locations, log)
         ingest_calibration(con, lib["id"], root, obs, log)
         ingest_integrations(con, lib["id"], root, obs, log)
+
+    if os.path.isdir(org):
+        populate_target_goals(con, org, log)
 
     ingest_legacy_xlsx(con, args.xlsx, log)
 

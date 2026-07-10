@@ -4,17 +4,17 @@ mark_integrated.py - record what you just stacked into an integration's master.
 
 After you (re)build an integration in PixInsight / PI Magic Studio, run this on
 its folder. It snapshots the sessions currently matching the integration's rule
-into the [built].sessions list and stamps built_machine, so the tracker knows
-exactly what is in the current master (built hours) versus what has been captured
-since (the "stale" gap). data_through is derived by ingest from the newest built
-session, so you never type a date.
+into the [built].sessions list, so the tracker knows exactly what is in the
+current master (built hours) versus what has been captured since (the "stale"
+gap). data_through is derived by ingest from the newest built session, and how
+it was stacked (PixInsight vs PI Magic) is auto-detected — you record nothing
+but the session list.
 
 The rest of the manifest (the [membership] rule, [pipeline] flags, [notes]) is
 left untouched. Preview by default; pass --apply to write.
 
     python3 mark_integrated.py "<integration folder>"            # preview
     python3 mark_integrated.py "<integration folder>" --apply
-    python3 mark_integrated.py "<integration folder>" --apply --machine Alienware
     python3 mark_integrated.py "<integration folder>" --apply --clear   # empty [built]
 
 For a pinned integration the snapshot is the pinned member list; adjust by hand
@@ -23,7 +23,6 @@ if you deliberately stacked a different subset.
 import argparse
 import os
 import re
-import socket
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -54,34 +53,22 @@ def set_array(text, key, items):
     return new, n > 0
 
 
-def set_scalar_str(text, key, value):
-    """Replace `key = "..."` with a new string value. Returns (text, replaced?)."""
-    new, n = re.subn(r'(?m)^' + key + r'\s*=\s*"[^"]*"',
-                     lambda _m: f'{key} = "{value}"', text)
-    return new, n > 0
+def apply_built(text, sessions):
+    """Write the [built] sessions list into the manifest text.
 
-
-def apply_built(text, sessions, machine):
-    """Write the [built] sessions + machine into the manifest text.
-
-    Falls back to appending a fresh [built] section if the keys are absent.
+    Falls back to appending a fresh [built] section if the key is absent.
 
     Args:
         text: current manifest contents.
         sessions: member folder names to record as built.
-        machine: machine name to stamp.
 
     Returns:
         Updated manifest text.
     """
-    text, ok_sessions = set_array(text, "sessions", sessions)
-    text, ok_machine = set_scalar_str(text, "built_machine", machine)
-    if ok_sessions and ok_machine:
+    text, ok = set_array(text, "sessions", sessions)
+    if ok:
         return text
-    # Manifest lacked the keys — append a clean [built] section.
-    section = ["", "[built]", f'built_machine = "{machine}"', "sessions = ["]
-    section += [f'  "{s}",' for s in sessions]
-    section += ["]", ""]
+    section = ["", "[built]", "sessions = ["] + [f'  "{s}",' for s in sessions] + ["]", ""]
     return text.rstrip("\n") + "\n" + "\n".join(section)
 
 
@@ -90,8 +77,6 @@ def main():
     ap = argparse.ArgumentParser(
         description="Record the sessions stacked into an integration's master.")
     ap.add_argument("integration_dir", help="path to the integration folder")
-    ap.add_argument("--machine", default=None,
-                    help="machine that produced the master (default: this hostname)")
     ap.add_argument("--clear", action="store_true",
                     help="empty [built] (mark nothing as stacked)")
     ap.add_argument("--apply", action="store_true",
@@ -105,7 +90,6 @@ def main():
 
     man = ingest.read_integration_toml(mpath)
     sessions = [] if args.clear else resolve_available(idir, man)
-    machine = "" if args.clear else (args.machine or socket.gethostname().split(".")[0])
 
     dates = [ingest.SESSION_RE.match(s).group("date")
              for s in sessions if ingest.SESSION_RE.match(s)]
@@ -113,8 +97,7 @@ def main():
 
     print(f"Integration : {os.path.basename(os.path.normpath(idir))}")
     print(f"Built       : {len(sessions)} session(s)"
-          + (f", data through {data_through}" if data_through else "")
-          + (f", machine {machine}" if machine else ""))
+          + (f", data through {data_through}" if data_through else ""))
     for s in sessions:
         print(f"  {s}")
 
@@ -124,7 +107,7 @@ def main():
         return
 
     text = open(mpath, encoding="utf-8").read()
-    new_text = apply_built(text, sessions, machine)
+    new_text = apply_built(text, sessions)
     tmp = mpath + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(new_text)

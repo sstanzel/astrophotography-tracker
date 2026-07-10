@@ -97,18 +97,19 @@ CREATE TABLE sessions (
     library_id          TEXT NOT NULL REFERENCES libraries(library_id),
     folder_path         TEXT NOT NULL,       -- relative to library.root_path
     is_other_capture    INTEGER NOT NULL DEFAULT 0,  -- denormalised from targets
-    -- pipeline stages. 0=not started, 1=in progress, 2=done.
-    -- 1-3 are the session's own capture/prep. 4-7 belong to this session
-    -- viewed AS a single-session integration (its own .pxiproject + Results).
-    -- A multi-session or composite integration is a row in the integrations
-    -- table instead, with its own 4-7.
-    stage_capture       INTEGER DEFAULT 1,   -- 1: captured
-    stage_blink_reject  INTEGER DEFAULT 0,   -- 2
-    stage_calibrate     INTEGER DEFAULT 0,   -- 3
-    stage_integrate     INTEGER DEFAULT 0,   -- 4  (single-session integration)
-    stage_edit          INTEGER DEFAULT 0,   -- 5
-    stage_publish       INTEGER DEFAULT 0,   -- 6
-    stage_print         INTEGER DEFAULT 0,   -- 7
+    -- pipeline stages. 0=not started, 1=in progress, 2=done. The ladder is
+    -- Planned(0) Captured(1) Culled(2) Integrated(3) Edited(4) Published(5)
+    -- Printed(6). Stages 3-6 view this session AS a single-session integration
+    -- (its own .pxiproject/Results); a multi-session integration is a row in the
+    -- integrations table instead. (Calibration is no longer a separate stage —
+    -- WBPP / PI Magic Studio roll flats + dark-flats in at integration time.)
+    stage_capture       INTEGER DEFAULT 1,   -- 1 Captured
+    stage_culled        INTEGER DEFAULT 0,   -- 2 Culled (bad frames pulled to Rejected/)
+    stage_integrate     INTEGER DEFAULT 0,   -- 3 Integrated (single-session)
+    stage_edit          INTEGER DEFAULT 0,   -- 4 Edited
+    stage_publish       INTEGER DEFAULT 0,   -- 5 Published
+    stage_print         INTEGER DEFAULT 0,   -- 6 Printed
+    integration_method  TEXT,                -- 'PixInsight'|'PI Magic'|'other' (how it was stacked)
     astrobin_url        TEXT,                -- if this single-session image was published
     -- denormalised counts (refreshed on every scan)
     lights_kept         INTEGER DEFAULT 0,
@@ -126,13 +127,6 @@ CREATE TABLE sessions (
     moon_phase_pct      REAL,
     guide_camera        TEXT,
     guide_scope         TEXT,
-    -- PI Magic Studio initial-processing tracking. Manual: set in the session's
-    -- notes.toml [processing] section, re-read (never overwritten) every ingest.
-    -- machine records WHICH PC ran it; a non-null machine (or the flag = true)
-    -- means done in PI Magic Studio rather than PixInsight initially.
-    pi_magic_studio     INTEGER DEFAULT 0,   -- 1 if run in PI Magic Studio
-    pi_magic_machine    TEXT,                -- which machine (e.g. 'MacMini', 'Alienware')
-    pi_magic_date       TEXT,                -- YYYY-MM-DD it was run (optional)
     -- validation inputs (recorded by the ingest walk; feed the validate() pass)
     notes_toml_present  INTEGER DEFAULT 0,   -- 1 if {session} notes.toml exists
     unparsed_file_count INTEGER DEFAULT 0,   -- raw-capture FITS files whose name did not parse
@@ -179,7 +173,7 @@ CREATE TABLE integrations (
     -- from rig+span each ingest; 'pinned' = an explicit frozen list.
     membership_mode  TEXT NOT NULL DEFAULT 'auto' CHECK (membership_mode IN ('auto','pinned')),
     goal_hours       REAL,                     -- optional integration-hours goal (the "quest")
-    built_machine    TEXT,                     -- which PC produced the current master ([built])
+    integration_method TEXT,                   -- 'PixInsight'|'PI Magic'|'other' (how it was stacked)
     -- pipeline stages 4-7 for this integration. 0=not started,1=in progress,2=done.
     -- stage_integrate is 1+ by definition (the folder exists); 4 is implicit.
     stage_integrate  INTEGER NOT NULL DEFAULT 2,
@@ -478,15 +472,15 @@ CREATE VIEW v_session_pipeline AS
 SELECT
     s.session_id, s.target_id, t.common_name,
     s.scope, s.sensor, s.session_date, s.library_id, s.is_other_capture,
-    s.stage_capture, s.stage_blink_reject, s.stage_calibrate,
+    s.stage_capture, s.stage_culled,
     s.stage_integrate, s.stage_edit, s.stage_publish, s.stage_print,
+    s.integration_method,
     CASE
-      WHEN s.stage_print     = 2 THEN '7 Printed'
-      WHEN s.stage_publish   = 2 THEN '6 Published'
-      WHEN s.stage_edit      = 2 THEN '5 Edited'
-      WHEN s.stage_integrate = 2 THEN '4 Integrated'
-      WHEN s.stage_calibrate = 2 THEN '3 Calibrated'
-      WHEN s.stage_blink_reject = 2 THEN '2 Blink/Reject done'
+      WHEN s.stage_print     = 2 THEN '6 Printed'
+      WHEN s.stage_publish   = 2 THEN '5 Published'
+      WHEN s.stage_edit      = 2 THEN '4 Edited'
+      WHEN s.stage_integrate = 2 THEN '3 Integrated'
+      WHEN s.stage_culled    = 2 THEN '2 Culled'
       WHEN s.stage_capture   = 1 THEN '1 Captured'
       ELSE '0 Planned'
     END AS furthest_stage
@@ -498,7 +492,7 @@ CREATE VIEW v_integration_overview AS
 SELECT
     i.integration_id, i.target_id, t.common_name,
     i.kind, i.folder_name, i.scope, i.sensor, i.span, i.version,
-    i.library_id, i.membership_mode, i.goal_hours, i.built_machine,
+    i.library_id, i.membership_mode, i.goal_hours, i.integration_method,
     COUNT(im.session_id)                                       AS sessions_available,
     SUM(COALESCE(im.in_build, 0))                              AS sessions_built,
     ROUND(SUM(s.integration_s) / 3600.0, 2)                   AS available_hours,
@@ -508,10 +502,10 @@ SELECT
     CASE WHEN SUM(CASE WHEN im.in_build = 1 THEN 0 ELSE 1 END) > 0 THEN 1 ELSE 0 END
                                                                AS is_stale,
     CASE
-      WHEN i.stage_print   = 2 THEN '7 Printed'
-      WHEN i.stage_publish = 2 THEN '6 Published'
-      WHEN i.stage_edit    = 2 THEN '5 Edited'
-      ELSE '4 Integrated'
+      WHEN i.stage_print   = 2 THEN '6 Printed'
+      WHEN i.stage_publish = 2 THEN '5 Published'
+      WHEN i.stage_edit    = 2 THEN '4 Edited'
+      ELSE '3 Integrated'
     END AS furthest_stage
 FROM integrations i
 JOIN targets t USING (target_id)

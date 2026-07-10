@@ -78,13 +78,17 @@ def main():
               UNION ALL
               SELECT target_id, CAST(substr(furthest_stage,1,1) AS INTEGER) AS n
               FROM v_integration_overview
+              UNION ALL
+              SELECT t.target_id, 0 FROM targets t
+              WHERE NOT t.is_other_capture
+                AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.target_id=t.target_id)
             ),
             best AS (SELECT target_id, MAX(n) AS n FROM stages GROUP BY target_id)
             SELECT CASE n
-                WHEN 7 THEN '7 Printed'    WHEN 6 THEN '6 Published'
-                WHEN 5 THEN '5 Edited'     WHEN 4 THEN '4 Integrated'
-                WHEN 3 THEN '3 Calibrated' WHEN 2 THEN '2 Blink/Reject'
-                WHEN 1 THEN '1 Captured'   ELSE '0 Planned' END AS stage,
+                WHEN 6 THEN '6 Printed'   WHEN 5 THEN '5 Published'
+                WHEN 4 THEN '4 Edited'    WHEN 3 THEN '3 Integrated'
+                WHEN 2 THEN '2 Culled'    WHEN 1 THEN '1 Captured'
+                ELSE '0 Planned' END AS stage,
               COUNT(*) AS count
             FROM best GROUP BY n ORDER BY n DESC""") if has_integrations else [],
         "sessionPipeline": rows("""SELECT furthest_stage AS stage, COUNT(*) AS count
@@ -105,16 +109,38 @@ def main():
                                ORDER BY class, rig, temperature_c, gain"""),
         "qc": rows("""SELECT target_id, session_date, captured_at_utc, hfr, rms_arcsec
                       FROM v_qc_candidates LIMIT 100"""),
-        "sessions": rows("""SELECT s.library_id AS library, s.target_id, t.catalog,
-                                   t.common_name, s.scope, s.sensor, s.session_date,
+        "sessions": rows("""SELECT s.library_id AS library, s.target_id, t.common_name,
+                                   s.scope, s.sensor, s.session_date,
                                    s.lights_kept AS lights, s.lights_rejected AS rejected,
                                    ROUND(s.integration_s/3600.0,2) AS hours,
-                                   COALESCE(s.pi_magic_machine,
-                                            CASE WHEN s.pi_magic_studio THEN 'Yes' END,
-                                            '') AS pi_magic,
+                                   COALESCE(s.integration_method,'') AS method,
+                                   vp.furthest_stage AS stage,
                                    s.is_other_capture AS other
                             FROM sessions s JOIN targets t USING(target_id)
+                            JOIN v_session_pipeline vp ON vp.session_id = s.session_id
                             ORDER BY s.session_date DESC, s.target_id"""),
+        # One row per deep-sky target: totals for the Targets table (session
+        # detail comes from D.sessions, grouped in the browser).
+        "targetRollup": rows("""
+            SELECT t.target_id, t.common_name,
+                   COUNT(s.session_id) AS sessions,
+                   COALESCE(SUM(s.lights_kept),0) AS lights,
+                   ROUND(COALESCE(SUM(s.integration_s),0)/3600.0,2) AS hours,
+                   MIN(s.session_date) AS first_date,
+                   MAX(s.session_date) AS last_date,
+                   (SELECT GROUP_CONCAT(DISTINCT scope||' '||sensor)
+                      FROM sessions WHERE target_id=t.target_id
+                        AND NOT is_other_capture) AS rigs,
+                   g.goal_hours,
+                   CASE WHEN g.goal_hours>0 THEN MIN(100,
+                        ROUND(100.0*COALESCE(SUM(s.integration_s),0)/3600.0/g.goal_hours))
+                        END AS goal_pct
+            FROM targets t
+            LEFT JOIN sessions s ON s.target_id=t.target_id AND NOT s.is_other_capture
+            LEFT JOIN target_goals g ON g.target_id=t.target_id
+            WHERE NOT t.is_other_capture
+            GROUP BY t.target_id
+            ORDER BY hours DESC, t.target_id"""),
     }
     if has_integrations:
         data["integrations"] = rows("""
@@ -129,7 +155,7 @@ def main():
                         END AS goal_pct,
                    sessions_built, sessions_available,
                    data_through,
-                   COALESCE(built_machine, '') AS machine,
+                   COALESCE(integration_method, '') AS method,
                    is_stale,
                    furthest_stage
             FROM v_integration_overview
@@ -240,8 +266,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <div class="grid two">
-  <div class="panel"><h2>Target pipeline</h2><div id="targetPipeline"></div></div>
-  <div class="panel"><h2>Session reach (capture to print)</h2><div id="sessionPipeline"></div></div>
+  <div class="panel"><h2>Target Image Processing</h2><div id="targetPipeline"></div></div>
+  <div class="panel"><h2>Session Image Processing</h2><div id="sessionPipeline"></div></div>
 </div>
 
 <div class="panel">
@@ -251,15 +277,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="panel"><h2>Target goal progress</h2><div id="progress"></div></div>
 
-<div class="panel"><h2>Calibration status</h2><div id="calibration"></div></div>
-
-<div class="panel"><h2>Quality-control candidates</h2><div id="qc"></div></div>
+<div class="panel">
+  <h2>Targets</h2>
+  <div class="sub" style="margin-bottom:8px">Totals per target; expand detail in the Sessions table below.</div>
+  <div class="scroll"><table id="targetsTable"></table></div>
+</div>
 
 <div class="panel">
   <h2>Sessions</h2>
   <div style="margin-bottom:10px"><input type="search" id="sfilter" placeholder="filter by target, scope, sensor..."></div>
   <div class="scroll"><table id="sessionsTable"></table></div>
 </div>
+
+<div class="panel"><h2>Calibration status</h2><div id="calibration"></div></div>
+
+<div class="panel"><h2>Quality-control candidates</h2><div id="qc"></div></div>
 
 <div class="foot">Generated by export_html.py from tracker.db — re-run after ingest.py to refresh.</div>
 
@@ -334,15 +366,19 @@ new Chart(document.getElementById("targetChart"), {
     plugins:{ legend:{display:false} } }
 });
 
-// ---- simple count tables ----
-function countTable(elId, data){
+// ---- pipeline count tables (every stage in order, zero-filled) ----
+const PIPELINE_STAGES = ["0 Planned","1 Captured","2 Culled","3 Integrated",
+                         "4 Edited","5 Published","6 Printed"];
+function stageTable(elId, data){
+  const by = {}; (data||[]).forEach(r=>by[r.stage]=r.count);
   document.getElementById(elId).innerHTML =
-    "<table><thead><tr><th>Stage</th><th>Count</th></tr></thead><tbody>" +
-    data.map(r=>`<tr><td>${r.stage}</td><td class="num">${r.count}</td></tr>`).join("") +
+    "<table><thead><tr><th>Processing step</th><th>Count</th></tr></thead><tbody>" +
+    PIPELINE_STAGES.map(s=>`<tr><td>${s}</td>`+
+      `<td class="num">${by[s]||0}</td></tr>`).join("") +
     "</tbody></table>";
 }
-countTable("targetPipeline", D.targetPipeline);
-countTable("sessionPipeline", D.sessionPipeline);
+stageTable("targetPipeline", D.targetPipeline);
+stageTable("sessionPipeline", D.sessionPipeline);
 
 // ---- multi-session integrations ----
 (function(){
@@ -362,7 +398,7 @@ countTable("sessionPipeline", D.sessionPipeline);
   el.innerHTML = head +
     "<table><thead><tr><th>Target</th><th>Rig</th><th>Span</th>"+
     "<th>Built hrs</th><th>Available</th><th>Goal</th><th>Progress</th>"+
-    "<th>Data through</th><th>Machine</th><th>State</th><th>Stage</th>"+
+    "<th>Data through</th><th>Method</th><th>State</th><th>Stage</th>"+
     "</tr></thead><tbody>" +
     rows.map(r=>{
       const pct = r.goal_pct;
@@ -380,10 +416,32 @@ countTable("sessionPipeline", D.sessionPipeline);
       `<td class="num">${r.goal_hours??""}</td>`+
       `<td>${prog}</td>`+
       `<td>${r.data_through||""}</td>`+
-      `<td>${r.machine}</td>`+
+      `<td>${r.method}</td>`+
       `<td>${state}</td>`+
       `<td>${r.furthest_stage}</td></tr>`;
     }).join("") + "</tbody></table>";
+})();
+
+// ---- targets table (per-target totals) ----
+(function(){
+  const rows = D.targetRollup || [];
+  const span = r => (r.first_date && r.last_date)
+    ? (r.first_date===r.last_date ? r.first_date : r.first_date+" → "+r.last_date) : "";
+  document.getElementById("targetsTable").innerHTML =
+    "<thead><tr><th>Target</th><th>Sessions</th><th>Rigs</th><th>Lights</th>"+
+    "<th>Hrs</th><th>Dates</th><th>Goal</th><th>Progress</th></tr></thead><tbody>"+
+    rows.map(r=>{
+      const prog = (r.goal_hours>0)
+        ? `<div class="bar"><span style="width:${r.goal_pct}%"></span></div> ${r.goal_pct}%` : "";
+      return `<tr><td>${r.common_name||r.target_id}</td>`+
+        `<td class="num">${r.sessions}</td>`+
+        `<td>${r.rigs||""}</td>`+
+        `<td class="num">${r.lights}</td>`+
+        `<td class="num">${r.hours.toFixed(1)}</td>`+
+        `<td>${span(r)}</td>`+
+        `<td class="num">${r.goal_hours??""}</td>`+
+        `<td>${prog}</td></tr>`;
+    }).join("") + "</tbody>";
 })();
 
 // ---- progress bars ----
@@ -443,7 +501,7 @@ countTable("sessionPipeline", D.sessionPipeline);
     ["session_date","Date"],["target_id","Target"],["common_name","Name"],
     ["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],
     ["rejected","Rej.","num"],["hours","Hrs","num"],
-    ["pi_magic","PI Magic Studio"],["library","Lib"],
+    ["stage","Stage"],["method","Method"],["library","Lib"],
   ];
   let sortKey="session_date", sortDir=-1;
   const tbl = document.getElementById("sessionsTable");

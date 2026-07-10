@@ -56,7 +56,7 @@ SELECT t.target_id, t.common_name,
 FROM targets t JOIN sessions s ON s.target_id = t.target_id
 WHERE NOT t.is_other_capture
   AND t.stage_integrate < 2
-  AND s.stage_calibrate = 2
+  AND s.stage_culled = 2
 GROUP BY t.target_id
 HAVING COUNT(s.session_id) >= 2
 ORDER BY hours_available DESC;
@@ -154,7 +154,7 @@ GROUP BY furthest_stage ORDER BY furthest_stage;
 SELECT target_id, common_name, session_date, scope, sensor
 FROM v_session_pipeline
 WHERE NOT is_other_capture
-  AND stage_calibrate = 2 AND stage_integrate < 2
+  AND stage_culled = 2 AND stage_integrate < 2
 ORDER BY session_date;
 
 -- C4. Frames captured this year at gain X, temp Y (ad-hoc filter)
@@ -252,7 +252,7 @@ SELECT s.target_id, s.session_date, s.scope, s.sensor
 FROM sessions s
 WHERE NOT s.is_other_capture
   AND s.flats_count = 0
-  AND s.stage_calibrate < 2
+  AND s.stage_culled < 2
 ORDER BY s.session_date;
 
 -- -- H. FIELD & ALIAS QUERIES ------------------------------------------------
