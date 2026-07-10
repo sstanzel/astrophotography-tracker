@@ -464,6 +464,7 @@ def main():
     print(f"Found {len(notes)} session notes.toml to process\n")
 
     n_sky = n_weather = n_skipped_weather = n_loc_unknown = n_offdate = 0
+    n_have_weather = 0   # already filled — API skipped
     n_write_fail = 0
     write_failed = []
     weather_cache = {}  # (site, d0, d1) -> result, avoids duplicate API calls
@@ -500,8 +501,14 @@ def main():
                     "moon_age_days": age}
 
         # --- weather (network) ---
+        # Skip the API entirely if this session's [weather] is already filled
+        # (temperature_c has a value). Blank sections — including recent nights
+        # the archive can't cover yet — are retried on the next run.
         weather_vals = {}
-        if not args.no_weather:
+        if not args.no_weather and re.search(
+                r'^\s*temperature_c\s*=\s*-?[\d.]+', text, re.M):
+            n_have_weather += 1
+        elif not args.no_weather:
             key = (loc, start.date().isoformat(), end.date().isoformat())
             if key in weather_cache:
                 weather_vals = weather_cache[key] or {}
@@ -555,6 +562,8 @@ def main():
     print(f"\n{'DRY RUN - no files written' if args.dry_run else 'Done'}")
     print(f"  sessions with sky fields filled    : {n_sky}")
     print(f"  sessions with weather fields filled: {n_weather}")
+    if n_have_weather:
+        print(f"  sessions already had weather (skipped API): {n_have_weather}")
     if n_skipped_weather:
         print(f"  sessions with no weather data      : {n_skipped_weather}")
     if n_loc_unknown:
