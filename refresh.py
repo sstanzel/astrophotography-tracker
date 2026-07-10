@@ -58,8 +58,13 @@ def main() -> None:
                     help="skip the library scan; only re-render and mirror")
     ap.add_argument("--no-mirror", action="store_true",
                     help="don't copy the outputs to the [mirror] path")
+    ap.add_argument("--notes", action="store_true",
+                    help="first back-fill sky/weather in session notes.toml "
+                         "(moon always; weather only for recent nights)")
     args = ap.parse_args()
 
+    if args.notes:
+        run_step("populate_notes.py")
     if not args.no_ingest:
         run_step("ingest.py")
     run_step("export_html.py")
