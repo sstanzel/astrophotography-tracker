@@ -15,6 +15,31 @@ with Steve 2026-07-10.
 - A table with **both** labels them **`Target ID`** and **`Name`** — never
   a Name column labeled "Target".
 
+## Full words in headers
+
+- Column headers use the **full word**: `Rejected`, `Library`, `Hours`,
+  `Priority`, `Available`, `Exposure (s)`, `Temperature`. Abbreviate only
+  when space is genuinely at a premium and the full label doesn't fit —
+  not out of habit.
+- Units go in parentheses after the word: `Exposure (s)`, `Built (hours)`,
+  `Temperature (°C)`.
+
+## Report in pipeline-flow order
+
+Detail sections — dashboard panels, `worklist.py all` lists, xlsx sheets —
+follow the seven processing steps: **Planned → Captured → Culled →
+Integrated → Edited → Published → Printed.** Calibration capture and
+master-building are planning-stage *actions* (a new camera means new plans,
+registry updates, and new bias/darks), so in action lists they sit up front
+with planning: capture → coverage → masters → cull → integrate → restack →
+edit. Two standing exceptions:
+
+- **Summaries come first**: the KPI cards, then Integration by year,
+  Top targets by lifetime hours, and the Published/Printed ledgers sit above
+  the detail sections.
+- **Reference/diagnostic panels go last**: Calibration status,
+  Light↔calibration coverage, QC candidates, and Data health close the page.
+
 ## Emphasis: no shouting
 
 - **ALL CAPS and red are reserved for act-now urgency** (data-loss risk,

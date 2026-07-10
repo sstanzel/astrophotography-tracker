@@ -16,28 +16,28 @@ import os
 import sqlite3
 import sys
 
-ACTIONS = ("cull", "integrate", "edit", "restack", "capture", "masters",
-           "coverage")
+ACTIONS = ("capture", "coverage", "masters", "cull", "integrate",
+           "restack", "edit")
 
 QUERIES = {
     "cull": ("Sessions to cull (captured, not yet reviewed)", """
         SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
-               s.lights_kept AS lights, s.lights_rejected AS rej,
-               s.integration_s/3600.0 AS hrs
+               s.lights_kept AS lights, s.lights_rejected AS rejected,
+               s.integration_s/3600.0 AS hours
         FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
         WHERE NOT s.is_other_capture AND vp.furthest_stage='1 Captured'
         ORDER BY s.session_date DESC"""),
     "integrate": ("Sessions to integrate (culled, not yet stacked)", """
         SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
-               s.lights_kept AS lights, s.integration_s/3600.0 AS hrs
+               s.lights_kept AS lights, s.integration_s/3600.0 AS hours
         FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
         WHERE NOT s.is_other_capture AND vp.furthest_stage='2 Culled'
         ORDER BY s.session_date DESC"""),
     "edit": ("Finished images to edit (integrated, not edited)", """
         SELECT s.target_id AS target, s.session_date||' '||s.scope||' '||s.sensor AS image,
-               'session' AS type, s.integration_s/3600.0 AS hrs
+               'session' AS type, s.integration_s/3600.0 AS hours
         FROM sessions s
         WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
         UNION ALL
@@ -46,34 +46,35 @@ QUERIES = {
                 JOIN sessions ss ON ss.session_id=im.session_id
                 WHERE im.integration_id=i.integration_id)
         FROM integrations i WHERE i.stage_edit<2
-        ORDER BY hrs DESC"""),
+        ORDER BY hours DESC"""),
     "restack": ("Integrations to restack (new data since last stack)", """
         SELECT target_id AS target, folder_name AS integration,
-               built_hours AS built, available_hours AS avail,
+               built_hours AS built, available_hours AS available,
                available_hours-built_hours AS behind
         FROM v_integration_overview WHERE is_stale=1 ORDER BY behind DESC"""),
     "capture": ("Targets to capture more of (under goal, or planned)", """
         SELECT t.target_id AS target,
-               COALESCE(SUM(s.integration_s),0)/3600.0 AS hrs,
+               COALESCE(SUM(s.integration_s),0)/3600.0 AS hours,
                g.goal_hours AS goal,
                g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0 AS gap,
-               g.priority AS prio
+               g.priority
         FROM targets t
         LEFT JOIN sessions s ON s.target_id=t.target_id AND NOT s.is_other_capture
         LEFT JOIN target_goals g ON g.target_id=t.target_id
         WHERE NOT t.is_other_capture
         GROUP BY t.target_id
-        HAVING (g.goal_hours IS NOT NULL AND hrs < g.goal_hours) OR COUNT(s.session_id)=0
+        HAVING (g.goal_hours IS NOT NULL AND hours < g.goal_hours) OR COUNT(s.session_id)=0
         ORDER BY g.priority, gap DESC"""),
     "masters": ("Calibration sets to turn into masters (bias/dark, no master)", """
-        SELECT class, camera, temperature_c AS temp, gain, exp_s AS exp,
-               frame_count AS frames
+        SELECT class, camera, temperature_c AS temperature, gain,
+               exp_s AS exposure, frame_count AS frames
         FROM calibration_masters
         WHERE class IN ('bias','dark') AND is_generated_master=0
         ORDER BY class, camera, temperature_c, gain, exp_s"""),
     "coverage": ("Light combos missing dark/bias coverage (shoot or build)", """
-        SELECT camera, gain, exp_s AS exp, light_subs AS subs, hours,
-               subs_dark_none AS no_dark, dark_status AS dark, bias_status AS bias
+        SELECT camera, gain, exp_s AS exposure, light_subs AS subs, hours,
+               subs_dark_none AS "missing dark", dark_status AS dark,
+               bias_status AS bias
         FROM v_light_calibration_coverage
         WHERE dark_status != 'ok' OR bias_status != 'ok'
         ORDER BY camera, gain, exp_s"""),
@@ -106,13 +107,13 @@ def fmt_exp(exp):
 
 # per-action column formatters, keyed by the SQL column alias
 FORMATTERS = {
-    "cull":      {"hrs": fmt_hm},
-    "integrate": {"hrs": fmt_hm},
-    "edit":      {"hrs": fmt_hm},
-    "restack":   {"built": fmt_hm, "avail": fmt_hm, "behind": fmt_hm},
-    "capture":   {"hrs": fmt_h, "goal": fmt_h, "gap": fmt_h},
-    "masters":   {"exp": fmt_exp},
-    "coverage":  {"exp": fmt_exp, "hours": fmt_h},
+    "cull":      {"hours": fmt_hm},
+    "integrate": {"hours": fmt_hm},
+    "edit":      {"hours": fmt_hm},
+    "restack":   {"built": fmt_hm, "available": fmt_hm, "behind": fmt_hm},
+    "capture":   {"hours": fmt_h, "goal": fmt_h, "gap": fmt_h},
+    "masters":   {"exposure": fmt_exp},
+    "coverage":  {"exposure": fmt_exp, "hours": fmt_h},
 }
 
 

@@ -103,7 +103,7 @@ def main():
     # S OtherCapture T FolderPath
     s_headers = ["Library", "Target ID", "Catalog", "Name", "Scope", "Sensor",
                  "Session Date", "Year", "Lights", "Rejected", "Flats", "Dark Flats",
-                 "Darks", "Bias", "Integration (hrs)", "Stage", "Method",
+                 "Darks", "Bias", "Integration (hours)", "Stage", "Method",
                  "Culled", "Other Capture", "Integrate", "Edit", "Publish",
                  "Print", "AstroBin URL", "Folder Path"]
     s_rows = []
@@ -151,11 +151,11 @@ def main():
     # columns are derived from the target's sessions (single-session
     # integrations) and its multi-session integrations.
     wt = wb.create_sheet("Targets")
-    t_headers = ["Target ID", "Catalog", "Name", "Sessions", "Lifetime Hrs",
-                 "2024 Hrs", "2025 Hrs", "2026 Hrs", "Lights", "Scopes Used",
+    t_headers = ["Target ID", "Catalog", "Name", "Sessions", "Lifetime Hours",
+                 "2024 Hours", "2025 Hours", "2026 Hours", "Lights", "Scopes Used",
                  "First Session", "Last Session", "Integrations",
-                 "Sessions Published", "Integ. Published", "Furthest Stage",
-                 "AstroBin URL", "Goal Hrs", "% Complete"]
+                 "Sessions Published", "Integrations Published", "Furthest Stage",
+                 "AstroBin URL", "Goal Hours", "% Complete"]
     t_rows = []
     for r in cur.execute("""
         SELECT t.target_id, t.catalog, t.common_name, t.is_other_capture,
@@ -239,7 +239,7 @@ def main():
 
     # ------------------------------------------------------------ Calibration
     wc = wb.create_sheet("Calibration")
-    c_headers = ["Class", "Camera", "Scope", "Temp °C", "Gain", "Exp (s)",
+    c_headers = ["Class", "Camera", "Scope", "Temperature (°C)", "Gain", "Exposure (s)",
                  "Raw Sets", "Raw Frames", "Master Date", "Status", "Below Threshold"]
     c_rows = []
     for r in cur.execute("""
@@ -266,8 +266,8 @@ def main():
     # v_light_calibration_coverage: per (camera, gain, exposure) combo the
     # kept lights use, is matching dark/bias data on hand (see schema.sql).
     wl = wb.create_sheet("Light Coverage")
-    l_headers = ["Camera", "Gain", "Exp (s)", "Light Subs", "Hours",
-                 "Temp Min", "Temp Max", "Subs Dark-Mastered", "Subs Dark-Raw",
+    l_headers = ["Camera", "Gain", "Exposure (s)", "Light Subs", "Hours",
+                 "Temperature Min", "Temperature Max", "Subs Dark-Mastered", "Subs Dark-Raw",
                  "Subs No Dark", "Dark Status", "Bias Status"]
     l_rows = [[r["camera"], r["gain"], r["exp_s"], r["light_subs"], r["hours"],
                r["temp_min"], r["temp_max"], r["subs_dark_master"],
@@ -318,8 +318,8 @@ def main():
                            r["furthest_stage"], r["folder_name"]])
     n_integ = len(i_rows)
     wi = wb.create_sheet("Integrations")
-    i_headers = ["Target", "Kind", "Rig", "Span", "Built (hrs)", "Available (hrs)",
-                 "Goal (hrs)", "Progress %", "Sessions Built", "Sessions Available",
+    i_headers = ["Target", "Kind", "Rig", "Span", "Built (hours)", "Available (hours)",
+                 "Goal (hours)", "Progress %", "Sessions Built", "Sessions Available",
                  "Data Through", "Method", "State", "Stage", "Folder"]
     write_sheet(wi, i_headers,
                 i_rows or [["(no multi-session integrations yet)"] + [""] * 14],
@@ -378,6 +378,12 @@ def main():
         row += 1
     wsum.column_dimensions["A"].width = 36
     wsum.column_dimensions["B"].width = 16
+
+    # Sheet order follows the pipeline flow (STYLE.md): summary, then
+    # planning -> captured -> integrated, with calibration + health at the end.
+    sheet_order = ["Summary", "Targets", "Sessions", "Integrations",
+                   "Calibration", "Light Coverage", "QC Candidates", "Data Health"]
+    wb._sheets = [wb[t] for t in sheet_order]
 
     wb.save(args.out)
     con.close()
