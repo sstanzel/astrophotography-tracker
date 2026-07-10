@@ -100,7 +100,13 @@ children.push(new Paragraph({ alignment: AlignmentType.CENTER,
   spacing: { after: 240 } }));
 children.push(new Paragraph({ alignment: AlignmentType.CENTER,
   children: [new TextRun({ text: `Steve Stanzel  ·  ${STATS.asOf}  ·  revision 2, for peer review`, font: ARIAL, size: 22, color: "555555" })],
-  spacing: { after: 960 } }));
+  spacing: { after: 120 } }));
+// Contact for circulated copies. Before the repo goes public, consider
+// swapping the personal address for a purpose alias on the domain (e.g.
+// astro@stanzel.com) — addresses committed to public GitHub get scraped.
+children.push(new Paragraph({ alignment: AlignmentType.CENTER,
+  children: [new TextRun({ text: "425.444.3552  ·  steve@stanzel.com", font: ARIAL, size: 20, color: "555555" })],
+  spacing: { after: 840 } }));
 
 // ---- Abstract -----------------------------------------------------------
 children.push(h2("Abstract"));
@@ -121,29 +127,29 @@ children.push(p("Below that summary layer sit the pipeline tables, the work queu
 // ---- 1 ------------------------------------------------------------------
 children.push(h1("1.  Why a written convention"));
 children.push(p("Astrophotography data degrades quietly. The night you captured M 81 is unambiguous in the moment, but a year later — with more sessions piled on top of it from several telescope-camera combinations — you can be reduced to opening FITS headers to remember what was what. The convention here is the smallest set of rules that, applied consistently, lets a script (or a future version of yourself) answer questions about the capture tree without opening a single image."));
-children.push(p("Three questions motivated the design:"));
+children.push(p("A few questions motivated the design:"));
 children.push(bullet("How many hours of usable integration do I have on a given target, this year and lifetime?"));
-children.push(bullet("Which telescope-camera combinations have imaged a given target, and which still owe me data?"));
+children.push(bullet("Which telescope-camera combinations have imaged a given target, and which still need data collected?"));
 children.push(bullet("Where in the processing pipeline is each session right now, and what should I work on next?"));
-children.push(p("There is also a question the first version of this system did not ask, and this revision answers: does the data I have actually captured have matching calibration — the right bias and dark masters for every gain, exposure, and temperature my light frames use? That turns out to be derivable from the files too (Section 11)."));
-children.push(p("If the folder tree cannot answer these questions mechanically, the structure is not doing its job. The rest of this paper is the structure that can."));
+children.push(bullet("Does the data I have actually captured have matching calibration — the right bias and dark masters for every gain, exposure, and temperature my light frames use?"));
+children.push(p("If the folder tree cannot answer these questions based on the structure, then the small text-file sidecar and a local HTML dashboard should be able to."));
 
 // ---- 2 ------------------------------------------------------------------
 children.push(h1("2.  Goals and principles"));
-children.push(p("Six principles shape every decision below:"));
+children.push(p("Six principles shape this design:"));
 children.push(bulletRich([new TextRun({ text: "Self-describing folders. ", bold: true, font: ARIAL }), new TextRun({ text: "Every directory name tells a parser the target, the rig, and the night without opening anything inside it.", font: ARIAL })]));
-children.push(bulletRich([new TextRun({ text: "Controlled vocabularies. ", bold: true, font: ARIAL }), new TextRun({ text: "Filter, telescope, camera, and target labels are drawn from a fixed registry of empty directories. The list of valid values is itself a set of folders, so the filesystem is the authority.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "Controlled vocabularies. ", bold: true, font: ARIAL }), new TextRun({ text: "Filter, telescope, camera, and target labels are drawn from a fixed registry of empty directories. The list of valid values is itself a set of folders, so the filesystem is the authority. If you get a new sensor, just add a new folder to add it — and that name will be used consistently throughout your libraries.", font: ARIAL })]));
 children.push(bulletRich([new TextRun({ text: "One folder structure per night. ", bold: true, font: ARIAL }), new TextRun({ text: "Post Haste (Digital Rebellion's free folder-templating application) creates the same session folder structure every time, so PixInsight and PIMagic Studio always find what they need.", font: ARIAL })]));
-children.push(bulletRich([new TextRun({ text: "Filename metadata, not sidecar metadata. ", bold: true, font: ARIAL }), new TextRun({ text: "ASIAir (ZWO's capture controller) encodes exposure, gain, camera, binning, datetime, and sensor temperature in every frame's filename; NINA (the Windows capture suite) encodes the same plus per-frame focus and guiding quality. The system reads that rather than reinventing it.", font: ARIAL })]));
-children.push(bulletRich([new TextRun({ text: "Derived state, never recorded state. ", bold: true, font: ARIAL }), new TextRun({ text: "A session is “culled” because frames sit in its Rejected folder; “integrated” because its Results folder holds output; a calibration set “has a master” because a master file sits inside it. The tracker never asks you to declare these things — it observes them, every scan, from scratch. The single deliberate exception is the “edited” flag, because no file reliably distinguishes a finished edit from an unedited master.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "Filename metadata, not sidecar metadata. ", bold: true, font: ARIAL }), new TextRun({ text: "ASIAir (ZWO's capture controller) encodes exposure, gain, camera, binning, datetime, and sensor temperature in every frame's filename; NINA (the Windows capture suite) encodes the same plus per-frame focus and guiding quality. The system reads it and doesn’t recreate it.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "Derived state, never recorded state. ", bold: true, font: ARIAL }), new TextRun({ text: "A session is “culled” because frames sit in its Rejected folder; “integrated” because its Results folder holds output; a calibration set “has a master” because a master file sits inside it. The tracker never asks you to declare these things — it observes them, every scan, from scratch. The single deliberate exception is the “edited” flag in the per-session and per-integration text file, because no file reliably distinguishes a finished edit from an unedited master.", font: ARIAL })]));
 children.push(bulletRich([new TextRun({ text: "Calibration organized by reusability. ", bold: true, font: ARIAL }), new TextRun({ text: "Bias and dark frames depend only on the camera and its settings, so they live once in a shared library and are pre-built into masters. Flats and dark-flats depend on the night's focuser position and dust, so they stay with their session.", font: ARIAL })]));
 children.push(p("Together these make the dataset structurally queryable — integration totals come from filenames, pipeline state comes from folder contents, and no FITS-header parsing is required for the common case."));
 
 // ---- 3 ------------------------------------------------------------------
 children.push(h1("3.  The two capture libraries and the registry"));
 children.push(p("Captures live on two physical volumes that share an identical internal structure:"));
-children.push(bulletRich([new TextRun({ text: "The working volume. ", bold: true, font: ARIAL }), new TextRun({ text: "Current-year imaging on a fast external solid-state drive. New sessions land here and most active processing happens here.", font: ARIAL })]));
-children.push(bulletRich([new TextRun({ text: "The lifetime archive. ", bold: true, font: ARIAL }), new TextRun({ text: "Prior-year sessions on a network-attached storage volume. Sessions migrate from the working volume to the archive after a year is closed out.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "SSD — the working volume. ", bold: true, font: ARIAL }), new TextRun({ text: "Current-year imaging on a fast external solid-state drive. New sessions land here and most active processing happens here.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "NAS — the lifetime archive. ", bold: true, font: ARIAL }), new TextRun({ text: "Prior-year sessions on a network-attached storage volume. Sessions migrate from the working volume to the archive after a year is closed out.", font: ARIAL })]));
 children.push(p("Every directly visible directory at a library root is a target — one folder per object, named with the catalog identifier and common name (for example, “M 81 Bodes Galaxy”). The exceptions are the shared calibration library (Section 6), a folder for live-stacking output, and the “other captures” buckets (Section 7). Inside each target folder the children are session folders, one per night per rig, plus an optional integrations folder (Section 9)."));
 children.push(p("The tracker is configured with the list of libraries in a single TOML file, and scans all of them; a query for lifetime hours on a target aggregates across volumes transparently. Adding a third library — a second archive, a travel drive — is one more block in the configuration file."));
 
@@ -159,8 +165,8 @@ children.push(table([2600, 900, 5860], ["Vocabulary", "Members", "Purpose"], [
 children.push(p("Because the registry is folders, adding a camera is one mkdir — and every validation and report immediately knows the new name is legal. The full vocabulary lists are reproduced in Appendix A. The tracker validates in both directions: a session folder using a name that is not in the registry is flagged, and so is a calibration folder (Section 6), so a typo cannot quietly create a phantom camera."));
 
 // ---- 4 ------------------------------------------------------------------
-children.push(h1("4.  The session folder structure"));
-children.push(p("Post Haste creates each session folder from a single template, which expands into the following structure:"));
+children.push(h1("4.  The per-session structure"));
+children.push(p("Each imaging night is organized into the same set of folders and files created by Post Haste from a template, with the following structure:"));
 children.push(...codeBlock([
   "{Target_id} {Scope} {Sensor} {YYYY-MM-DD}/",
   "├── Light/                                  ← raw light frames",
@@ -174,7 +180,7 @@ children.push(...codeBlock([
   "├── {session_name} Results/                 ← the keepers (master + exports)",
   "└── {session_name} notes.toml               ← per-session metadata (Section 4.1)",
 ]));
-children.push(p("The folders divide into three roles, and the roles carry the data-retention policy. Raw data — Light, Rejected, and the Flat set — is never touched by any tool. The Results folder holds the keepers: the integrated master and any exports or edit files, the things other programs need to open. PI Process and PI Magic are recreatable scratch — intermediates that a cleanup script empties to reclaim space. One rule ties the roles together: the keepers must reach Results before the scratch folders are swept. A promotion script copies masters and edit files from the working folders into Results, and the cleanup script refuses to empty any session whose master has not been promoted — so a cleanup can never lose a finished image."));
+children.push(p("The folders divide into three roles, and the roles carry the data-retention policy. Raw data — Light, Rejected, Flat and Dark Flat files — is not modified by any process. The Results folder holds the output of processing you want to keep: the integrated master and any exports or edit files, the things other programs need to open. PI Process and PI Magic are scratch folders recreatable from the raw data — intermediates that a cleanup script empties to reclaim space. One rule ties the roles together: the keepers must reach Results before the scratch folders are swept. A promotion script copies masters and edit files from the working folders into Results, and the cleanup script refuses to empty any session whose master has not been promoted — so a cleanup can never lose a finished image."));
 children.push(p("Two more choices are opinionated by design. In-session calibration is limited to flats and dark-flats, which depend on the night (Section 6 covers the rest). And every session has its own PixInsight project — a project is tied to a single night, and combining across nights is a first-class concept of its own (Section 9)."));
 
 children.push(h2("4.1  The notes file: what only the night can tell you"));
@@ -217,13 +223,13 @@ children.push(table([1900, 7460], ["Grammar", "Example"], [
   ["NINA science", "LIGHT_M 106_300.00s_Bin1x1_Poseidon-C PRO_gain125_2026-05-12_22-56-19_288.99deg_-20.00C__HFR2.83_RMS0.42_LQuadE_0001.fits"],
   ["ASIAir DSLR", "Light_Orion_300.0s_Bin1_ISO1600_20240406-221530_23.0C_R5_0012.fit"],
 ]));
-children.push(p("In every grammar each field is structurally extractable: target (when present), exposure, binning, camera, gain, datetime, optional rotation angle, sensor temperature, optional filter, and a sequence counter. Because the data is in the filename, totalling integration on a target reduces to walking the light frames, parsing each name, and summing — only frames rejected during culling and sub-second preview frames are excluded. The NINA science grammar additionally carries HFR (half-flux radius, a focus-quality measure) and RMS (guiding error in arcseconds), which lets the tracker flag poor frames from filenames alone. The full reference patterns are in Appendix B."));
+children.push(p("In every grammar each field is structurally extractable: target (when present), exposure, binning, camera, gain, datetime, optional rotation angle, sensor temperature, optional filter, and a sequence counter. Because the data is in the filename, totalling integration on a target reduces to walking the light frames, parsing each name, and summing — only frames rejected during culling and sub-second preview frames are excluded. The NINA science grammar additionally carries HFR (half-flux radius, a focus-quality measure) and RMS (guiding error in arcseconds), which lets the tracker flag poor frames from filenames alone. The full reference patterns are in Appendix C."));
 
 // ---- 6 ------------------------------------------------------------------
 children.push(h1("6.  Calibration, organized by reusability"));
 children.push(p("Calibration frames divide cleanly by what they depend on, and that dependency decides where they live:"));
 children.push(bulletRich([new TextRun({ text: "Flats and dark-flats depend on the night ", bold: true, font: ARIAL }), new TextRun({ text: "— the focuser position, the camera's rotational alignment, and the dust state of the optical train. They stay with the session they calibrate, in a subdirectory named for the rig and date. When several targets share one flat set on a multi-target night, the other sessions reference the set in their notes file rather than duplicating it.", font: ARIAL })]));
-children.push(bulletRich([new TextRun({ text: "Bias and dark frames depend only on the camera and its settings ", bold: true, font: ARIAL }), new TextRun({ text: "— gain for bias; gain, exposure, and sensor temperature for darks. They are captured once per combination, live in a shared calibration library, and are worth pre-building into master frames that are then reused for years.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "Bias and dark frames depend only on the camera and its settings ", bold: true, font: ARIAL }), new TextRun({ text: "— gain for bias; gain, exposure, and sensor temperature for darks. They are captured once per combination, live in a shared calibration library, and are worth pre-building into master frames that are then reused for six months to a year.", font: ARIAL })]));
 children.push(p(`The shared library currently holds ${STATS.calibrationSets} bias and dark sets, organized around hardware rather than targets:`));
 children.push(...codeBlock([
   "_Calibration Library/",
@@ -277,7 +283,7 @@ children.push(...codeBlock([
 children.push(p("The tracker collects every block into a publications table and shows two ledgers — Published and Printed — with clickable links. The pipeline flags “published” and “printed” are then derived: an image is published if it has at least one publication record. Nothing is checked off by hand, which keeps the record and the state permanently consistent."));
 
 // ---- 11 -----------------------------------------------------------------
-children.push(h1("11.  The tracker: data structure, initial ingest, and the three faces"));
+children.push(h1("11.  The tracker: data structure, initial ingest, and the three views"));
 
 children.push(h2("11.1  How the data is structured"));
 children.push(p("The database is SQLite — a single file, no server — and its shape mirrors the folder convention directly:"));
@@ -294,9 +300,9 @@ children.push(...codeBlock([
   "integrations(…) + integration_members(…)        ← Section 9's two halves",
   "publications(…)                                 ← Section 10's ledger",
   "target_goals(…) · calibration_thresholds(…) · processing_todos(…)",
-  "validation_findings(severity, code, message, …) ← Appendix E",
+  "validation_findings(severity, code, message, …) ← Appendix B",
 ]));
-children.push(p("Session identity is the four-token natural key, enforced UNIQUE — the same tuple that names the folder. Frames belong to sessions; each frame row is one parsed filename. On top of the tables, a set of SQL views computes the derived answers — per-session pipeline stage, integration overview with staleness, calibration needs, and the light-versus-calibration coverage report — so every reporting face reads the same logic. Representative queries are in Appendix C."));
+children.push(p("Session identity is the four-token natural key, enforced UNIQUE — the same tuple that names the folder. Frames belong to sessions; each frame row is one parsed filename. On top of the tables, a set of SQL views computes the derived answers — per-session pipeline stage, integration overview with staleness, calibration needs, and the light-versus-calibration coverage report — so every reporting face reads the same logic. Representative queries are in Appendix D."));
 
 children.push(h2("11.2  Initial ingest — from an existing library to a populated database"));
 children.push(p("Setup is intentionally small. The management folder is cloned anywhere; the only machine-specific piece is one TOML configuration file:"));
@@ -311,10 +317,10 @@ children.push(...codeBlock([
   "path = \"/Volumes/nas/…/Astrophotography Library\"",
   "role = \"archive\"",
 ]));
-children.push(p("The first run of the ingest script creates the database from the schema and then does what every later run does: load the vocabularies from the registry; walk each library's target folders; parse every session folder name and every frame filename against the nine grammars; sum kept exposure into integration seconds; walk the calibration library into calibration sets; resolve integration manifests; read each session's notes file; and finish with a validation pass (Appendix E) that reports anything that did not parse or does not conform. The scan is idempotent — every row is upserted on its natural key, so re-running after a capture night refreshes the data without duplicating it, and all derived fields (frame counts, masters detected, stage flags) are recomputed from the current state of the disk. A full two-library scan of roughly 15,000 frames takes on the order of a minute."));
+children.push(p("The first run of the ingest script creates the database from the schema and then does what every later run does: load the vocabularies from the registry; walk each library's target folders; parse every session folder name and every frame filename against the nine grammars; sum kept exposure into integration seconds; walk the calibration library into calibration sets; resolve integration manifests; read each session's notes file; and finish with a validation pass (Appendix B) that reports anything that did not parse or does not conform. The scan is idempotent — every row is upserted on its natural key, so re-running after a capture night refreshes the data without duplicating it, and all derived fields (frame counts, masters detected, stage flags) are recomputed from the current state of the disk. A full two-library scan of roughly 15,000 frames takes on the order of a minute."));
 children.push(p("Day to day, one command — refresh.py — chains the whole pipeline: ingest, then regenerate both report faces, then copy them to a cloud-synced mirror folder so the current dashboard is readable even when the capture volumes are dismounted."));
 
-children.push(h2("11.3  The three faces"));
+children.push(h2("11.3  The three views of the library"));
 children.push(p("The database is the single source of truth; everything human-facing is generated from it and disposable:"));
 children.push(bulletRich([new TextRun({ text: "The HTML dashboard ", bold: true, font: ARIAL }), new TextRun({ text: "— a single self-contained file: headline cards, integration-by-year and top-target charts, the published/printed ledgers, pipeline tables, the work queue (next section), sortable and filterable tables for targets, sessions, and integrations, and the calibration and data-health panels.", font: ARIAL })]));
 children.push(bulletRich([new TextRun({ text: "The Excel workbook ", bold: true, font: ARIAL }), new TextRun({ text: "— the same data as live SUMIF-driven sheets for anyone who wants to slice it by hand.", font: ARIAL })]));
@@ -390,11 +396,6 @@ children.push(table([3600, 1100, 1100, 3560], ["Target", "Hours", "Sessions", "S
 ]));
 children.push(p("Imaging by year: 35 sessions and 124 hours in 2024; 39 sessions and 127 hours in 2025; 142 sessions and 502 hours in 2026 to date."));
 
-// ---- Availability + Acknowledgements -------------------------------------
-children.push(h1("Availability and acknowledgements"));
-children.push(p("The toolchain is plain Python and SQLite — no services, no daemons. The only third-party dependency is the library used to write the Excel workbook, and the only network call is one request per session to a free historical-weather service (Open-Meteo) to fill the notes file's weather section. The repository (scripts, schema, configuration template, and the style guide) will be shared publicly so the system can be run rather than just read; the capture data itself, of course, stays home."));
-children.push(p("This revision describes a working system, not a proposal — every number in it was produced by the code it documents. Comments, corrections, and counter-arguments from other astrophotographers remain welcome; several decisions in this revision (the culled stage, the ledger model, dropping machine tracking) came directly from using the first draft's design and finding its edges."));
-
 // ---- Appendix A ---------------------------------------------------------
 children.push(new Paragraph({ children: [new PageBreak()] }));
 children.push(h1("Appendix A.  Controlled vocabularies"));
@@ -411,7 +412,21 @@ children.push(h2("A.4  Filters (14)"));
 children.push(p(`The target vocabulary (${STATS.registryTargets} folders) is omitted for space; it follows the naming convention of Section 5.1.`));
 
 // ---- Appendix B ---------------------------------------------------------
-children.push(h1("Appendix B.  The nine filename grammars"));
+children.push(h1("Appendix B.  Onboarding an existing library"));
+children.push(p("The system was not adopted on day one of a new hobby — it was retrofitted onto two years of accumulated captures. Two tools exist specifically to make that safe, and they are the first things to run against any existing library."));
+children.push(h2("B.1  The validation pass"));
+children.push(p("Every ingest ends with a validation pass over the populated database — pure observation, never modifying the library. Each finding carries a severity and a code; the taxonomy covers the ways real libraries actually drift:"));
+children.push(table([1500, 2400, 5460], ["Severity", "Examples", "Meaning"], [
+  ["error", "EMPTY_SESSION, DATE_MISMATCH, FUTURE_DATE", "Something is structurally wrong: a session folder with no frames and no results, or a folder date that contradicts every frame timestamp inside it."],
+  ["warning", "UNKNOWN_SENSOR, UNKNOWN_SCOPE, CAL_UNKNOWN_CAMERA, UNPARSED_SESSION_NAME, UNPARSED_FITS, SENSOR_MISMATCH, MULTI_NIGHT_SPAN", "Something does not conform: a name not in the registry (for sessions and for calibration folders alike), a filename no grammar recognizes, a folder sensor that contradicts the FITS header, or frames spanning more nights than the folder claims."],
+  ["info", "NOTES_MISSING, CAL_EMPTY, REGISTRY_ORPHAN", "Housekeeping: a session without a notes file, an empty calibration folder, a registry entry never yet imaged."],
+]));
+children.push(p("Findings appear in the dashboard's data-health panel and the workbook. The practical onboarding loop is: run the ingest, read the findings, fix the library (rename, merge, or registry-add), and re-run until the board is clean. Onboarding this library took a handful of such passes: the process surfaced misspelled catalog names, duplicate target folders differing by a typo, truncated camera tokens, and — most consequentially — filename-grammar gaps that had left roughly 3,000 frames uncounted until two additional grammars and filter-name handling were added. The current state is zero errors and zero warnings across both libraries, which is what makes every number in this paper trustworthy."));
+children.push(h2("B.2  The staging preflight"));
+children.push(p("New sessions are staged in a holding folder before being filed into the library. A preflight script checks each staged session: the folder name parses into four valid tokens, the target is known — to the library or to the registry — the rig combination is registered, the frames inside parse, and the move would not collide with an existing session. By default it prints a verdict per session and touches nothing; with an apply flag it files the passing sessions, creating the target folder from the registry when the library does not have it yet. That last detail enforces a deliberate rule: the registry is the single source of truth for target names, and libraries carry no empty target folders — a folder exists in a library only once real data has been filed into it. The same script resolves the _adjacent suffix and reports what a staged piggyback session will attach to. Between the preflight at the front door and the validation pass behind it, a malformed name has no quiet way into the library — which is what keeps a convention alive longer than enthusiasm does."));
+
+// ---- Appendix C ---------------------------------------------------------
+children.push(h1("Appendix C.  The nine filename grammars"));
 children.push(p("The parser tries each grammar in order; the first match wins. All matches expose: frame type, exposure value and unit, camera, gain (or ISO), datetime, optional rotation, temperature, optional filter, and a sequence index. The NINA science grammar additionally exposes HFR and RMS. Framing snapshots and preview files are recognized as deliberate non-science and excluded from unparsed-file warnings."));
 children.push(table([600, 3600, 5160], ["#", "Grammar", "Shape"], [
   ["1", "ASIAir science", "Light_{target}_{exp}{s|ms}_Bin{N}_{cam}_gain{G}_{dt}_[{rot}deg_]{temp}C[_{filter}]_{idx}.fit"],
@@ -433,8 +448,8 @@ children.push(...codeBlock([
 ]));
 children.push(p("The NINA pattern is NINA's default with the literal anchors Bin, gain, deg, and C added so the structure mirrors ASIAir, and a double underscore as a deliberate visual marker between physical metadata and quality-of-capture metadata. HFR, RMS, and the filter may all be empty; the parser accepts either case, including filter names containing spaces."));
 
-// ---- Appendix C ---------------------------------------------------------
-children.push(h1("Appendix C.  Representative tracker queries"));
+// ---- Appendix D ---------------------------------------------------------
+children.push(h1("Appendix D.  Representative tracker queries"));
 children.push(p("Three examples, runnable as written against the database. The first computes integration from the frame level; the second and third read the derived views, which is how the dashboard and worklist get their answers."));
 children.push(...codeBlock([
   "-- Lifetime and this-year integration on a target:",
@@ -466,8 +481,8 @@ children.push(...codeBlock([
   "ORDER BY hours DESC;",
 ]));
 
-// ---- Appendix D ---------------------------------------------------------
-children.push(h1("Appendix D.  Other approaches to astrophotography data organization"));
+// ---- Appendix E ---------------------------------------------------------
+children.push(h1("Appendix E.  Other approaches to astrophotography data organization"));
 children.push(p("The structure described in this paper is one point in a wide design space. The approaches below are the ones most discussed in amateur communities such as Cloudy Nights and the AstroBin forums, followed by how two professional observatories handle the same problem. They are offered as a reference for readers weighing the trade-offs."));
 
 children.push(h2("E.1  Date-first hierarchy"));
@@ -489,19 +504,13 @@ children.push(h2("E.6  Professional practice: Hubble and JWST"));
 children.push(p("The Hubble Space Telescope names every dataset with a nine-character “IPPPSSOOT” rootname that encodes the instrument, proposal, observation set, and observation in fixed-width positions; each file is the rootname plus a suffix indicating its processing level — raw, calibrated, drizzled, and so on. JWST uses a comparable scheme of program and observation identifiers. In both cases the filenames are deliberately machine-oriented — the documentation states plainly that they are not designed to be scientist-friendly — and all human searching is done through the Mikulski Archive for Space Telescopes, a relational archive that indexes the opaque filenames by target name, program, instrument, exposure type, and date."));
 children.push(p("The professional lesson is the separation of two concerns: a rigid, machine-parseable identity encoded in the filename, and a separate searchable layer — a database — built on top of it. This paper's system follows the same division: self-describing folder and file names provide the rigid identity, and the SQLite tracker provides the searchable layer. The deliberate difference is one of scale. An amateur archive of under a hundred targets can afford folder names that are human-readable as well as machine-parseable, so the imager gets both and rarely needs the database for routine work. The database earns its place for the aggregate questions — integration totals, calibration coverage, pipeline state — that no single folder name can answer."));
 
-// ---- Appendix E ---------------------------------------------------------
-children.push(h1("Appendix E.  Onboarding an existing library"));
-children.push(p("The system was not adopted on day one of a new hobby — it was retrofitted onto two years of accumulated captures. Two tools exist specifically to make that safe, and they are the first things to run against any existing library."));
-children.push(h2("F.1  The validation pass"));
-children.push(p("Every ingest ends with a validation pass over the populated database — pure observation, never modifying the library. Each finding carries a severity and a code; the taxonomy covers the ways real libraries actually drift:"));
-children.push(table([1500, 2400, 5460], ["Severity", "Examples", "Meaning"], [
-  ["error", "EMPTY_SESSION, DATE_MISMATCH, FUTURE_DATE", "Something is structurally wrong: a session folder with no frames and no results, or a folder date that contradicts every frame timestamp inside it."],
-  ["warning", "UNKNOWN_SENSOR, UNKNOWN_SCOPE, CAL_UNKNOWN_CAMERA, UNPARSED_SESSION_NAME, UNPARSED_FITS, SENSOR_MISMATCH, MULTI_NIGHT_SPAN", "Something does not conform: a name not in the registry (for sessions and for calibration folders alike), a filename no grammar recognizes, a folder sensor that contradicts the FITS header, or frames spanning more nights than the folder claims."],
-  ["info", "NOTES_MISSING, CAL_EMPTY, REGISTRY_ORPHAN", "Housekeeping: a session without a notes file, an empty calibration folder, a registry entry never yet imaged."],
-]));
-children.push(p("Findings appear in the dashboard's data-health panel and the workbook. The practical onboarding loop is: run the ingest, read the findings, fix the library (rename, merge, or registry-add), and re-run until the board is clean. Onboarding this library took a handful of such passes: the process surfaced misspelled catalog names, duplicate target folders differing by a typo, truncated camera tokens, and — most consequentially — filename-grammar gaps that had left roughly 3,000 frames uncounted until two additional grammars and filter-name handling were added. The current state is zero errors and zero warnings across both libraries, which is what makes every number in this paper trustworthy."));
-children.push(h2("F.2  The staging preflight"));
-children.push(p("New sessions are staged in a holding folder before being filed into the library. A preflight script checks each staged session: the folder name parses into four valid tokens, the target is known — to the library or to the registry — the rig combination is registered, the frames inside parse, and the move would not collide with an existing session. By default it prints a verdict per session and touches nothing; with an apply flag it files the passing sessions, creating the target folder from the registry when the library does not have it yet. That last detail enforces a deliberate rule: the registry is the single source of truth for target names, and libraries carry no empty target folders — a folder exists in a library only once real data has been filed into it. The same script resolves the _adjacent suffix and reports what a staged piggyback session will attach to. Between the preflight at the front door and the validation pass behind it, a malformed name has no quiet way into the library — which is what keeps a convention alive longer than enthusiasm does."));
+// ---- Availability + Acknowledgements -------------------------------------
+children.push(h1("Availability and acknowledgements"));
+children.push(p("The toolchain is plain Python and SQLite — no services, no daemons. The only third-party dependency is the library used to write the Excel workbook, and the only network call is one request per session to a free historical-weather service (Open-Meteo) to fill the notes file's weather section. The repository (scripts, schema, configuration template, and the style guide) will be shared publicly so the system can be run rather than just read; the capture data itself, of course, stays home."));
+children.push(p("This revision describes a working system, not a proposal — every number in it was produced by the code it documents. Comments, corrections, and counter-arguments from other astrophotographers remain welcome; several decisions in this revision (the culled stage, the ledger model, dropping machine tracking) came directly from using the first draft's design and finding its edges."));
+children.push(p("One ask in particular: we would love to hear of other examples of astrophotography library management — formal or improvised, at any scale — that can help strengthen this design in its next iteration."));
+children.push(p("Thanks to anyone that read this far,"));
+children.push(new Paragraph({ children: [new TextRun({ text: "Steve", font: ARIAL, italics: true })], spacing: { after: 120 } }));
 
 // ---- Document -----------------------------------------------------------
 const doc = new Document({
