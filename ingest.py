@@ -937,6 +937,66 @@ def populate_target_goals(con, org_root, log):
                                          if skipped else ""))
 
 
+def populate_calibration_thresholds(con, org_root, log):
+    """Load `calibration_thresholds.toml` (array of [[threshold]] blocks) into
+    calibration_thresholds.
+
+    Each block: class = "bias"|"dark"|"flat", min_frames = <int>, optional
+    refresh_days / notes, and optional specificity keys (camera,
+    temperature_c, gain, exp_s) that override the class default for matching
+    sets. Replaces the table each run (the file is the source of truth);
+    a missing file leaves the schema-seeded defaults in place.
+
+    Args:
+        con: open DB connection.
+        org_root: the _organization folder path.
+        log: logging callable.
+    """
+    path = os.path.join(org_root, "calibration_thresholds.toml")
+    if not os.path.isfile(path):
+        return
+    rows, block = [], None
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line == "[[threshold]]":
+                block = {}
+                rows.append(block)
+                continue
+            if line.startswith("["):
+                block = None
+                continue
+            ms = re.match(r'(\w+)\s*=\s*"(.*?)"', line)
+            mn = re.match(r'(\w+)\s*=\s*(-?[\d.]+)', line)
+            if ms and block is not None:
+                block[ms.group(1)] = ms.group(2)
+            elif mn and block is not None:
+                block[mn.group(1)] = float(mn.group(2))
+    valid = [t for t in rows
+             if t.get("class") in ("bias", "dark", "flat") and "min_frames" in t]
+    if not valid:
+        log("  calibration thresholds: file present but no valid blocks — kept existing")
+        return
+    cur = con.cursor()
+    cur.execute("DELETE FROM calibration_thresholds")
+    for t in valid:
+        cur.execute("""INSERT INTO calibration_thresholds
+                       (class, camera, scope, temperature_c, gain, exp_s,
+                        min_frames, refresh_days, notes)
+                       VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (t["class"], t.get("camera"), t.get("scope"),
+                     t.get("temperature_c"),
+                     int(t["gain"]) if "gain" in t else None,
+                     t.get("exp_s"),
+                     int(t["min_frames"]),
+                     int(t["refresh_days"]) if "refresh_days" in t else None,
+                     t.get("notes")))
+    con.commit()
+    log(f"  calibration thresholds: {len(valid)} loaded")
+
+
 def ingest_library(con, library_id, root, obs, locations, log):
     """Walk one library: targets, sessions, frames.
 
@@ -1160,6 +1220,11 @@ def ingest_calibration(con, library_id, root, obs, log):
         log(f"  {library_id}: no _Calibration Library")
         return 0
     cur = con.cursor()
+    # Rebuild this library's rows from the walk — filesystem is truth, so sets
+    # that were moved or renamed must not linger as orphans. Lossless: every
+    # column is re-derived from disk. (Would need rethinking if the unused
+    # calibration_master_inputs lineage table ever gains rows.)
+    cur.execute("DELETE FROM calibration_masters WHERE library_id=?", (library_id,))
     n = 0
 
     def upsert(rec):
@@ -1790,6 +1855,7 @@ def main():
 
     if os.path.isdir(org):
         populate_target_goals(con, org, log)
+        populate_calibration_thresholds(con, org, log)
 
     ingest_legacy_xlsx(con, args.xlsx, log)
 
