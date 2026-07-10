@@ -692,6 +692,63 @@ def apply_migrations(con):
         WHERE kind = 'multi-session'
         GROUP BY target_id, scope, sensor, span
         HAVING COUNT(*) > 1;
+
+        -- Light↔calibration coverage (full rationale in schema.sql): per
+        -- (camera, gain, exposure) combo the kept lights use, is there
+        -- matching dark data (±5 °C set temperature; a set with no
+        -- temperature folder matches any) and bias data (per camera)?
+        -- OK = mastered, TO BUILD = raws only, TO SHOOT = missing.
+        DROP VIEW IF EXISTS v_light_calibration_coverage;
+        CREATE VIEW v_light_calibration_coverage AS
+        WITH lf AS (
+            SELECT f.frame_id, s.sensor AS camera, f.gain, f.exp_s, f.temp_c
+            FROM frames f
+            JOIN sessions s USING (session_id)
+            WHERE f.frame_type = 'light' AND NOT f.is_rejected
+              AND f.exp_unit = 's' AND NOT s.is_other_capture
+        ),
+        dark_match AS (
+            SELECT lf.frame_id,
+                   MAX(CASE WHEN cm.is_generated_master THEN 1 ELSE 0 END) AS dk_master,
+                   MAX(CASE WHEN cm.master_id IS NOT NULL THEN 1 ELSE 0 END) AS dk_any
+            FROM lf
+            LEFT JOIN calibration_masters cm
+              ON cm.class = 'dark' AND cm.camera = lf.camera
+             AND cm.gain = lf.gain AND cm.exp_s = lf.exp_s
+             AND (cm.temperature_c IS NULL OR lf.temp_c IS NULL
+                  OR ABS(cm.temperature_c - lf.temp_c) <= 5.0)
+            GROUP BY lf.frame_id
+        ),
+        bias_match AS (
+            SELECT camera, MAX(is_generated_master) AS bi_master
+            FROM calibration_masters
+            WHERE class = 'bias'
+            GROUP BY camera
+        )
+        SELECT
+            lf.camera, lf.gain, lf.exp_s,
+            COUNT(*)                                AS light_subs,
+            ROUND(SUM(lf.exp_s) / 3600.0, 2)        AS hours,
+            MIN(lf.temp_c)                          AS temp_min,
+            MAX(lf.temp_c)                          AS temp_max,
+            SUM(CASE WHEN dm.dk_master THEN 1 ELSE 0 END)                   AS subs_dark_master,
+            SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) AS subs_dark_raw,
+            SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END)                  AS subs_dark_none,
+            CASE
+              WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'TO SHOOT'
+              WHEN SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) > 0
+                THEN 'TO BUILD'
+              ELSE 'OK'
+            END AS dark_status,
+            CASE
+              WHEN bm.camera IS NULL THEN 'TO SHOOT'
+              WHEN bm.bi_master = 0  THEN 'TO BUILD'
+              ELSE 'OK'
+            END AS bias_status
+        FROM lf
+        JOIN dark_match dm USING (frame_id)
+        LEFT JOIN bias_match bm ON bm.camera = lf.camera
+        GROUP BY lf.camera, lf.gain, lf.exp_s;
     """)
     con.commit()
 
@@ -1054,9 +1111,15 @@ def ingest_calibration(con, library_id, root, obs, log):
             VALUES(:library_id,:class,:folder_path,:camera,:scope,:temperature_c,:gain,
                    :exp_s,:capture_date,:frame_count,:total_size_bytes,:is_generated_master)
             ON CONFLICT(folder_path) DO UPDATE SET
+              camera=excluded.camera,
+              scope=excluded.scope,
+              temperature_c=excluded.temperature_c,
+              gain=excluded.gain,
+              exp_s=excluded.exp_s,
               frame_count=excluded.frame_count,
               total_size_bytes=excluded.total_size_bytes,
               capture_date=excluded.capture_date,
+              is_generated_master=excluded.is_generated_master,
               updated_at=CURRENT_TIMESTAMP
         """, rec)
 
@@ -1114,6 +1177,18 @@ def ingest_calibration(con, library_id, root, obs, log):
                 if gm: gain = int(gm.group(1))
                 if em: exp = float(em.group(1))
             leaf = parts[-1]
+            # Some dark libraries skip the {Temp}/{Gain}/{Exp} tree and carry
+            # the parameters in the ASIAir-style set name instead, e.g.
+            # "Dark_300.0s_Bin1_2600MC_gain100_-20.0C". Fill whatever the path
+            # segments didn't provide from the leaf name's tokens (path wins).
+            if temp is None or gain is None or exp is None:
+                for tok in re.split(r"[_\s]+", leaf):
+                    tm = re.match(r"^(-?\d+(?:\.\d+)?)C$", tok)
+                    gm = re.match(r"^[Gg]ain(-?\d+)$", tok) or re.match(r"^ISO(\d+)$", tok)
+                    em = re.match(r"^(\d+(?:\.\d+)?)s$", tok)
+                    if tm and temp is None: temp = float(tm.group(1))
+                    if gm and gain is None: gain = int(gm.group(1))
+                    if em and exp  is None: exp  = float(em.group(1))
             is_master = 1 if has_master_file(camroot) else 0
             fc, sz = len(real_files), sum(
                 os.path.getsize(os.path.join(camroot, f)) for f in real_files
@@ -1512,6 +1587,46 @@ def validate(con, locations, obs, log):
     for rel in obs.get("cal_badname", []):
         add("warning", "CAL_NAMING", "calibration", None, rel,
             "Flat calibration folder name is missing its Scope_Sensor token.")
+
+    # Calibration folders vs the registry. Sessions are checked above
+    # (UNKNOWN_SCOPE/UNKNOWN_SENSOR); a mistyped Bias/Dark camera folder or
+    # Flat Scope_Sensor combo would otherwise slip through — and a camera
+    # folder that isn't the registry sensor name can never match any light
+    # in the coverage report.
+    def in_registry(table, col, name):
+        r = cur.execute(f"SELECT from_registry FROM {table} WHERE {col}=?",
+                        (name,)).fetchone()
+        return bool(r and r[0])
+
+    for cls, cam in cur.execute(
+            "SELECT DISTINCT class, camera FROM calibration_masters "
+            "WHERE class IN ('bias','dark') AND camera IS NOT NULL"):
+        if not in_registry("sensors", "sensor", cam):
+            add("warning", "CAL_UNKNOWN_CAMERA", "calibration", None,
+                f"_Calibration Library/{cls.capitalize()}/{cam}",
+                f"Calibration camera folder '{cam}' is not in "
+                f"_organization/sensor_values.")
+
+    seen_combos = set()
+    for (fp,) in cur.execute(
+            "SELECT folder_path FROM calibration_masters WHERE class='flat'"):
+        parts = fp.split("/")   # _Calibration Library/Flat/{Scope_Sensor}/{set}
+        if len(parts) < 4 or parts[2] in seen_combos:
+            continue
+        combo = parts[2]
+        seen_combos.add(combo)
+        if "_" not in combo:
+            continue   # CAL_NAMING above already flags the missing token
+        scope_tok, sensor_tok = combo.split("_", 1)
+        ref = f"_Calibration Library/Flat/{combo}"
+        if not in_registry("scopes", "scope", scope_tok):
+            add("warning", "CAL_UNKNOWN_SCOPE", "calibration", None, ref,
+                f"Flat combo scope '{scope_tok}' is not in "
+                f"_organization/scope_values.")
+        if not in_registry("sensors", "sensor", sensor_tok):
+            add("warning", "CAL_UNKNOWN_CAMERA", "calibration", None, ref,
+                f"Flat combo sensor '{sensor_tok}' is not in "
+                f"_organization/sensor_values.")
 
     # integrations — structural (from the walk)
     for rel in obs.get("integration_no_manifest", []):

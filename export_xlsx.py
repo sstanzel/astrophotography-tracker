@@ -262,6 +262,28 @@ def main():
         if st in status_colors:
             wc.cell(row=r, column=10).fill = PatternFill("solid", start_color=status_colors[st])
 
+    # ------------------------------------------------- Light-frame coverage
+    # v_light_calibration_coverage: per (camera, gain, exposure) combo the
+    # kept lights use, is matching dark/bias data on hand (see schema.sql).
+    wl = wb.create_sheet("Light Coverage")
+    l_headers = ["Camera", "Gain", "Exp (s)", "Light Subs", "Hours",
+                 "Temp Min", "Temp Max", "Subs Dark-Mastered", "Subs Dark-Raw",
+                 "Subs No Dark", "Dark Status", "Bias Status"]
+    l_rows = [[r["camera"], r["gain"], r["exp_s"], r["light_subs"], r["hours"],
+               r["temp_min"], r["temp_max"], r["subs_dark_master"],
+               r["subs_dark_raw"], r["subs_dark_none"],
+               r["dark_status"], r["bias_status"]]
+              for r in cur.execute("""
+                  SELECT * FROM v_light_calibration_coverage
+                  ORDER BY camera, gain, exp_s""")]
+    write_sheet(wl, l_headers, l_rows, col_formats={5: "0.00"})
+    cov_colors = {"TO SHOOT": "F4CCCC", "TO BUILD": "FCE5CD", "OK": "D9EAD3"}
+    for r in range(2, len(l_rows) + 2):
+        for col in (11, 12):
+            st = wl.cell(row=r, column=col).value
+            if st in cov_colors:
+                wl.cell(row=r, column=col).fill = PatternFill("solid", start_color=cov_colors[st])
+
     # ----------------------------------------------------------- QC candidates
     wq = wb.create_sheet("QC Candidates")
     q_headers = ["Target", "Session Date", "Captured (UTC)", "HFR", "RMS arcsec", "File"]

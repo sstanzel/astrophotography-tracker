@@ -16,7 +16,8 @@ import os
 import sqlite3
 import sys
 
-ACTIONS = ("cull", "integrate", "edit", "restack", "capture", "masters")
+ACTIONS = ("cull", "integrate", "edit", "restack", "capture", "masters",
+           "coverage")
 
 QUERIES = {
     "cull": ("Sessions to cull (captured, not yet reviewed)", """
@@ -70,6 +71,12 @@ QUERIES = {
         FROM calibration_masters
         WHERE class IN ('bias','dark') AND is_generated_master=0
         ORDER BY class, camera, temperature_c, gain, exp_s"""),
+    "coverage": ("Light combos missing dark/bias coverage (shoot or build)", """
+        SELECT camera, gain, exp_s AS exp, light_subs AS subs, hours,
+               subs_dark_none AS no_dark, dark_status AS dark, bias_status AS bias
+        FROM v_light_calibration_coverage
+        WHERE dark_status != 'OK' OR bias_status != 'OK'
+        ORDER BY camera, gain, exp_s"""),
 }
 
 

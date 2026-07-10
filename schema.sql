@@ -626,6 +626,68 @@ SELECT
     CASE WHEN raw_frames < min_frames THEN 1 ELSE 0 END AS below_threshold
 FROM resolved;
 
+-- Light↔calibration coverage: for every (camera, gain, exposure) combo the
+-- kept light frames actually use, does the _Calibration Library hold matching
+-- DARK data (same camera/gain/exposure, set temperature within ±5 °C of the
+-- light's sensor temperature — the widely used dark-matching tolerance; a set
+-- with no temperature folder, e.g. an uncooled DSLR, matches any) and BIAS
+-- data (per camera — bias sets aren't gain-foldered)? The camera key is the
+-- session's sensor: the registry name, which also names the calibration
+-- camera folders. Statuses: OK (a generated master covers every sub) /
+-- TO BUILD (raws cover it, master not yet built) / TO SHOOT (some subs have
+-- no matching calibration data at all). Flats are per-session by design and
+-- deliberately absent here.
+CREATE VIEW v_light_calibration_coverage AS
+WITH lf AS (
+    SELECT f.frame_id, s.sensor AS camera, f.gain, f.exp_s, f.temp_c
+    FROM frames f
+    JOIN sessions s USING (session_id)
+    WHERE f.frame_type = 'light' AND NOT f.is_rejected
+      AND f.exp_unit = 's' AND NOT s.is_other_capture
+),
+dark_match AS (
+    SELECT lf.frame_id,
+           MAX(CASE WHEN cm.is_generated_master THEN 1 ELSE 0 END) AS dk_master,
+           MAX(CASE WHEN cm.master_id IS NOT NULL THEN 1 ELSE 0 END) AS dk_any
+    FROM lf
+    LEFT JOIN calibration_masters cm
+      ON cm.class = 'dark' AND cm.camera = lf.camera
+     AND cm.gain = lf.gain AND cm.exp_s = lf.exp_s
+     AND (cm.temperature_c IS NULL OR lf.temp_c IS NULL
+          OR ABS(cm.temperature_c - lf.temp_c) <= 5.0)
+    GROUP BY lf.frame_id
+),
+bias_match AS (
+    SELECT camera, MAX(is_generated_master) AS bi_master
+    FROM calibration_masters
+    WHERE class = 'bias'
+    GROUP BY camera
+)
+SELECT
+    lf.camera, lf.gain, lf.exp_s,
+    COUNT(*)                                AS light_subs,
+    ROUND(SUM(lf.exp_s) / 3600.0, 2)        AS hours,
+    MIN(lf.temp_c)                          AS temp_min,
+    MAX(lf.temp_c)                          AS temp_max,
+    SUM(CASE WHEN dm.dk_master THEN 1 ELSE 0 END)                   AS subs_dark_master,
+    SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) AS subs_dark_raw,
+    SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END)                  AS subs_dark_none,
+    CASE
+      WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'TO SHOOT'
+      WHEN SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) > 0
+        THEN 'TO BUILD'
+      ELSE 'OK'
+    END AS dark_status,
+    CASE
+      WHEN bm.camera IS NULL THEN 'TO SHOOT'
+      WHEN bm.bi_master = 0  THEN 'TO BUILD'
+      ELSE 'OK'
+    END AS bias_status
+FROM lf
+JOIN dark_match dm USING (frame_id)
+LEFT JOIN bias_match bm ON bm.camera = lf.camera
+GROUP BY lf.camera, lf.gain, lf.exp_s;
+
 -- Target acquisition progress: lifetime hours against the goal, with percent
 -- complete and hours remaining. Powers the dashboard progress bars.
 CREATE VIEW v_target_progress AS
