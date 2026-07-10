@@ -93,11 +93,19 @@ const children = [];
 
 // ---- Cover --------------------------------------------------------------
 children.push(new Paragraph({ alignment: AlignmentType.CENTER,
-  children: [new TextRun({ text: "An astrophotography data-organization system", font: ARIAL, bold: true, size: 44 })],
-  spacing: { before: 1200, after: 240 } }));
+  children: [new TextRun({ text: "A simple system for local astrophotography data organization", font: ARIAL, bold: true, size: 52 })],
+  spacing: { before: 1100, after: 300 } }));
+// Three one-sentence subtitles, each its own centered line — deliberately
+// untraditional; they preview what's inside.
 children.push(new Paragraph({ alignment: AlignmentType.CENTER,
-  children: [new TextRun({ text: "Controlled vocabularies, a standard session folder structure, a shared calibration library, and a tracker that derives every processing state from the files themselves", font: ARIAL, italics: true, size: 26 })],
-  spacing: { after: 240 } }));
+  children: [new TextRun({ text: "An organizer and tracker that derives processing state directly from the files.", font: ARIAL, italics: true, size: 24 })],
+  spacing: { after: 140 } }));
+children.push(new Paragraph({ alignment: AlignmentType.CENTER,
+  children: [new TextRun({ text: "A dashboard to see all your captured data — target lists with integration time and the current image-processing state of every target.", font: ARIAL, italics: true, size: 24 })],
+  spacing: { after: 140 } }));
+children.push(new Paragraph({ alignment: AlignmentType.CENTER,
+  children: [new TextRun({ text: "A few scripts using controlled vocabularies, a session-keyed folder structure, and consistent calibration make keeping your library a simple task.", font: ARIAL, italics: true, size: 24 })],
+  spacing: { after: 300 } }));
 children.push(new Paragraph({ alignment: AlignmentType.CENTER,
   children: [new TextRun({ text: `Steve Stanzel  ·  ${STATS.asOf}  ·  revision 2, for peer review`, font: ARIAL, size: 22, color: "555555" })],
   spacing: { after: 120 } }));
@@ -530,7 +538,7 @@ const doc = new Document({
       margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
     footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER,
       children: [
-        new TextRun({ text: `Astrophotography data-organization system  ·  Steve Stanzel  ·  ${STATS.asOf}  ·  `, font: ARIAL, size: 18, color: "888888" }),
+        new TextRun({ text: `A simple system for local astrophotography data organization  ·  Steve Stanzel  ·  ${STATS.asOf}  ·  `, font: ARIAL, size: 18, color: "888888" }),
         new TextRun({ children: [PageNumber.CURRENT], font: ARIAL, size: 18, color: "888888" }),
       ] })] }) },
     children,
