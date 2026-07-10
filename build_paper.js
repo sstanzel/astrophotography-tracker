@@ -136,19 +136,19 @@ children.push(p("Together these make the dataset structurally queryable — inte
 // ---- 3 ------------------------------------------------------------------
 children.push(h1("3.  The two capture libraries and the registry"));
 children.push(p("Captures live on two physical volumes that share an identical internal structure:"));
-children.push(bulletRich([new TextRun({ text: "stream — the working volume. ", bold: true, font: ARIAL }), new TextRun({ text: "Current-year imaging on a fast external solid-state drive. New sessions land here and most active processing happens here.", font: ARIAL })]));
-children.push(bulletRich([new TextRun({ text: "peak — the lifetime archive. ", bold: true, font: ARIAL }), new TextRun({ text: "Prior-year sessions on a network-attached storage volume. Sessions migrate from stream to peak after a year is closed out.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "The working volume. ", bold: true, font: ARIAL }), new TextRun({ text: "Current-year imaging on a fast external solid-state drive. New sessions land here and most active processing happens here.", font: ARIAL })]));
+children.push(bulletRich([new TextRun({ text: "The lifetime archive. ", bold: true, font: ARIAL }), new TextRun({ text: "Prior-year sessions on a network-attached storage volume. Sessions migrate from the working volume to the archive after a year is closed out.", font: ARIAL })]));
 children.push(p("Every directly visible directory at a library root is a target — one folder per object, named with the catalog identifier and common name (for example, “M 81 Bodes Galaxy”). The exceptions are the shared calibration library (Section 6), a folder for live-stacking output, and the “other captures” buckets (Section 7). Inside each target folder the children are session folders, one per night per rig, plus an optional integrations folder (Section 9)."));
 children.push(p("The tracker is configured with the list of libraries in a single TOML file, and scans all of them; a query for lifetime hours on a target aggregates across volumes transparently. Adding a third library — a second archive, a travel drive — is one more block in the configuration file."));
 
 children.push(h2("3.1  The registry: _organization/"));
 children.push(p("The registry is the vocabulary authority, and it is deliberately empty: each subdirectory under _organization/ is a vocabulary, and the directory's contents are the legal values. The names are the data. It lives with the management scripts, outside the capture libraries, so there is exactly one authority no matter how many libraries exist."));
 children.push(table([2600, 900, 5860], ["Vocabulary", "Members", "Purpose"], [
-  ["filter_values/", "14", "Every filter used on any rig, each named with a short label and a descriptive suffix."],
   ["scope_values/", "9", "Every telescope and lens used for any kind of astronomical imaging."],
   ["sensor_values/", "10", "Every camera. “Sensor” is the term most astronomy tooling uses, although it names the whole camera, not just the chip."],
   ["scope+sensor_values/", "17", "The telescope-and-camera combinations that pair for deep-sky work. Only these may appear in session folder names."],
   ["target folders/", String(STATS.registryTargets), "The catalog identifier and common name of every object imaged or planned. The folder is created in the registry first; a copy appears in a capture library the first night the object is imaged."],
+  ["filter_values/", "14", "Every filter used on any rig, each named with a short label and a descriptive suffix."],
 ]));
 children.push(p("Because the registry is folders, adding a camera is one mkdir — and every validation and report immediately knows the new name is legal. The full vocabulary lists are reproduced in Appendix A. The tracker validates in both directions: a session folder using a name that is not in the registry is flagged, and so is a calibration folder (Section 6), so a typo cannot quietly create a phantom camera."));
 
@@ -282,13 +282,13 @@ children.push(h2("11.2  Initial ingest — from an existing library to a populat
 children.push(p("Setup is intentionally small. The management folder is cloned anywhere; the only machine-specific piece is one TOML configuration file:"));
 children.push(...codeBlock([
   "[[library]]",
-  "id   = \"stream\"",
-  "path = \"/Volumes/stream/…/As_Astrophotography 2026-Stream\"",
+  "id   = \"working\"",
+  "path = \"/Volumes/fast-ssd/…/Astrophotography 2026\"",
   "role = \"working\"",
   "",
   "[[library]]",
-  "id   = \"peak\"",
-  "path = \"/Volumes/peak/…/Astrophotography Library\"",
+  "id   = \"archive\"",
+  "path = \"/Volumes/nas/…/Astrophotography Library\"",
   "role = \"archive\"",
 ]));
 children.push(p("The first run of the ingest script creates the database from the schema and then does what every later run does: load the vocabularies from the registry; walk each library's target folders; parse every session folder name and every frame filename against the nine grammars; sum kept exposure into integration seconds; walk the calibration library into calibration sets; resolve integration manifests; read each session's notes file; and finish with a validation pass (Appendix F) that reports anything that did not parse or does not conform. The scan is idempotent — every row is upserted on its natural key, so re-running after a capture night refreshes the data without duplicating it, and all derived fields (frame counts, masters detected, stage flags) are recomputed from the current state of the disk. A full two-library scan of roughly 15,000 frames takes on the order of a minute."));
@@ -327,13 +327,13 @@ children.push(p("Every reporting face follows a short written style guide, versi
 children.push(h1("14.  Worked example: M 81 Bodes Galaxy"));
 children.push(p("M 81 is the most heavily imaged target in the combined library: 17 sessions across four telescope-camera combinations and both volumes, totalling 72 hours of kept integration. The folder structure at the M 81 level (excerpted):"));
 children.push(...codeBlock([
-  "peak (lifetime archive):",
+  "lifetime archive:",
   "  M 81 Bodes Galaxy/",
   "    M_81 Pleiades111 ASI2600MCAir 2025-01-26",
   "    M_81 Redcat51 ASI585MCPro 2026-02-10",
   "    …",
   "",
-  "stream (working volume):",
+  "working volume:",
   "  M 81 Bodes Galaxy/",
   "    M_81 HAC125DX ASI585MCPro 2026-04-18 / 19",
   "    M_81 RASA8 ASI2600MCAir 2026-04-18 / 19 / 20 / 22 / 23",
@@ -346,7 +346,7 @@ children.push(p("Everything this paper claims can be seen in miniature here. Int
 // ---- 15 -----------------------------------------------------------------
 children.push(h1("15.  Current library state"));
 children.push(p(`The figures below are produced by the tracker from a scan of both libraries, as of ${STATS.asOf}. The most recent full scan finished with zero validation errors and zero warnings.`));
-children.push(table([5300, 1700, 1700, 660], ["Metric", "stream", "peak", "Total"], [
+children.push(table([5300, 1700, 1700, 660], ["Metric", "Working", "Archive", "Total"], [
   ["Deep-sky sessions", String(STATS.streamSessions), String(STATS.peakSessions), String(STATS.deepSkySessions)],
   ["Kept integration (hours)", STATS.streamHours, STATS.peakHours, STATS.deepSkyHours],
   ["Deep-sky targets tracked", "", "", String(STATS.distinctTargets)],

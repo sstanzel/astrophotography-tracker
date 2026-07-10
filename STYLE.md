@@ -73,3 +73,20 @@ edit. Two standing exceptions:
 - CLI: `fmt_h` / `fmt_hm` / `fmt_exp` in `worklist.py`.
 - Statuses are lowercase **at the source** — the `v_calibration_needs` and
   `v_light_calibration_coverage` views — so every face inherits them.
+
+## Written documents (the paper)
+
+The same spirit extends to prose deliverables generated from this repo
+(`build_paper.js`):
+
+- **The narrative flow start-to-finish is part of the design** — sections
+  must build in reading order; edits that improve flow outrank local wording.
+- **Infrastructure names stay in configuration, not prose.** Network share
+  names and mount paths belong in `config.toml` (they must be there for the
+  system to run); documents refer to volumes by role — "the working volume",
+  "the lifetime archive".
+- **Order tables and lists by importance to the reader** (scopes and sensors
+  before filters), not by accident of the source.
+- The `.docx` is generated output. Hand edits are welcome as review, but they
+  must be backported into `build_paper.js` — and the principle behind each
+  edit applied across the whole document — or the next regeneration loses them.
