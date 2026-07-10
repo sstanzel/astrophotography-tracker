@@ -172,10 +172,25 @@ children.push(...codeBlock([
   "├── PI Magic/                               ← PIMagic Studio runs (scratch)",
   "├── {session_name}.pxiproject/              ← PixInsight project",
   "├── {session_name} Results/                 ← the keepers (master + exports)",
-  "└── {session_name} notes.toml               ← per-session metadata (Appendix D)",
+  "└── {session_name} notes.toml               ← per-session metadata (Section 4.1)",
 ]));
 children.push(p("The folders divide into three roles, and the roles carry the data-retention policy. Raw data — Light, Rejected, and the Flat set — is never touched by any tool. The Results folder holds the keepers: the integrated master and any exports or edit files, the things other programs need to open. PI Process and PI Magic are recreatable scratch — intermediates that a cleanup script empties to reclaim space. One rule ties the roles together: the keepers must reach Results before the scratch folders are swept. A promotion script copies masters and edit files from the working folders into Results, and the cleanup script refuses to empty any session whose master has not been promoted — so a cleanup can never lose a finished image."));
 children.push(p("Two more choices are opinionated by design. In-session calibration is limited to flats and dark-flats, which depend on the night (Section 6 covers the rest). And every session has its own PixInsight project — a project is tied to a single night, and combining across nights is a first-class concept of its own (Section 9)."));
+
+children.push(h2("4.1  The notes file: what only the night can tell you"));
+children.push(p("Every session folder carries a notes file — {session name} notes.toml — created with the folder structure. Its purpose is narrow and important: to record the things neither the folder name nor the frame filenames can carry. The session's identity (target, telescope, camera, date) is deliberately absent — it is already in the folder name and in every frame — so the file holds only conditions, observations, and downstream status. The format is TOML: comment-friendly, diff-friendly, and dependably parseable. The tracker reads every notes file on every scan, so a note edited on any machine reaches the next report with no synchronization step."));
+children.push(p("Most of the file fills itself. At ingest, the tracker computes the moon section from the session date and the site coordinates, and pulls the weather section — temperature, humidity, dew point, cloud cover, wind, pressure — once from a free historical-weather service for that date and location; a value already present is never overwritten. What remains for the human is exactly what should be: the site key (once), free-text observations from the night, processing commentary, the one manual pipeline flag (edited), the publication and print records of Section 10, and reprocessing to-dos the tracker aggregates into one queryable list."));
+children.push(table([2400, 1800, 5160], ["Section", "Filled by", "Contents"], [
+  ["location", "hand, once", "A key into a small locations file (site coordinates, Bortle sky-brightness class)."],
+  ["[sky]", "auto", "Moon phase, illumination percentage, and age in days — computed from the session date and the site coordinates at ingest."],
+  ["[weather]", "auto", "Temperature, humidity, dew point, cloud cover, wind, and pressure — pulled once from a historical weather service for the session's date and location. Seeing and transparency remain hand-filled."],
+  ["[observation]", "hand", "Free-text notes from the night — equipment quirks, passing cloud, satellite trails. The genuinely irreplaceable field."],
+  ["[processing]", "hand", "Commentary on processing attempts — what worked, what to redo."],
+  ["[integration]", "hand (one flag)", "edited = true, the pipeline's one manual flag (Section 8)."],
+  ["[[published]] / [[printed]]", "hand, per event", "The ledger blocks of Section 10."],
+  ["[future_processing]", "hand", "Short to-do lines; the tracker aggregates them across all sessions into one queryable processing to-do list."],
+]));
+children.push(p("Because these conditions land in the database next to the frames, questions that would once have meant paging through a logbook become trivial: what have I captured within a day of a new moon; how many sessions ran below freezing; what does my integration time look like by month. None of those queries is written into the tracker's views yet — but every field they need is already in the database, so each is one SELECT away, and the dashboard can grow whichever of them earn a permanent place."));
 
 // ---- 5 ------------------------------------------------------------------
 children.push(h1("5.  Naming conventions"));
@@ -279,7 +294,7 @@ children.push(...codeBlock([
   "integrations(…) + integration_members(…)        ← Section 9's two halves",
   "publications(…)                                 ← Section 10's ledger",
   "target_goals(…) · calibration_thresholds(…) · processing_todos(…)",
-  "validation_findings(severity, code, message, …) ← Appendix F",
+  "validation_findings(severity, code, message, …) ← Appendix E",
 ]));
 children.push(p("Session identity is the four-token natural key, enforced UNIQUE — the same tuple that names the folder. Frames belong to sessions; each frame row is one parsed filename. On top of the tables, a set of SQL views computes the derived answers — per-session pipeline stage, integration overview with staleness, calibration needs, and the light-versus-calibration coverage report — so every reporting face reads the same logic. Representative queries are in Appendix C."));
 
@@ -296,7 +311,7 @@ children.push(...codeBlock([
   "path = \"/Volumes/nas/…/Astrophotography Library\"",
   "role = \"archive\"",
 ]));
-children.push(p("The first run of the ingest script creates the database from the schema and then does what every later run does: load the vocabularies from the registry; walk each library's target folders; parse every session folder name and every frame filename against the nine grammars; sum kept exposure into integration seconds; walk the calibration library into calibration sets; resolve integration manifests; read each session's notes file; and finish with a validation pass (Appendix F) that reports anything that did not parse or does not conform. The scan is idempotent — every row is upserted on its natural key, so re-running after a capture night refreshes the data without duplicating it, and all derived fields (frame counts, masters detected, stage flags) are recomputed from the current state of the disk. A full two-library scan of roughly 15,000 frames takes on the order of a minute."));
+children.push(p("The first run of the ingest script creates the database from the schema and then does what every later run does: load the vocabularies from the registry; walk each library's target folders; parse every session folder name and every frame filename against the nine grammars; sum kept exposure into integration seconds; walk the calibration library into calibration sets; resolve integration manifests; read each session's notes file; and finish with a validation pass (Appendix E) that reports anything that did not parse or does not conform. The scan is idempotent — every row is upserted on its natural key, so re-running after a capture night refreshes the data without duplicating it, and all derived fields (frame counts, masters detected, stage flags) are recomputed from the current state of the disk. A full two-library scan of roughly 15,000 frames takes on the order of a minute."));
 children.push(p("Day to day, one command — refresh.py — chains the whole pipeline: ingest, then regenerate both report faces, then copy them to a cloud-synced mirror folder so the current dashboard is readable even when the capture volumes are dismounted."));
 
 children.push(h2("11.3  The three faces"));
@@ -377,7 +392,7 @@ children.push(p("Imaging by year: 35 sessions and 124 hours in 2024; 39 sessions
 
 // ---- Availability + Acknowledgements -------------------------------------
 children.push(h1("Availability and acknowledgements"));
-children.push(p("The toolchain is plain Python and SQLite — no services, no daemons; the only third-party dependency is the library used to write the Excel workbook. The repository (scripts, schema, configuration template, and the style guide) will be shared publicly so the system can be run rather than just read; the capture data itself, of course, stays home."));
+children.push(p("The toolchain is plain Python and SQLite — no services, no daemons. The only third-party dependency is the library used to write the Excel workbook, and the only network call is one request per session to a free historical-weather service (Open-Meteo) to fill the notes file's weather section. The repository (scripts, schema, configuration template, and the style guide) will be shared publicly so the system can be run rather than just read; the capture data itself, of course, stays home."));
 children.push(p("This revision describes a working system, not a proposal — every number in it was produced by the code it documents. Comments, corrections, and counter-arguments from other astrophotographers remain welcome; several decisions in this revision (the culled stage, the ledger model, dropping machine tracking) came directly from using the first draft's design and finding its edges."));
 
 // ---- Appendix A ---------------------------------------------------------
@@ -452,23 +467,7 @@ children.push(...codeBlock([
 ]));
 
 // ---- Appendix D ---------------------------------------------------------
-children.push(new Paragraph({ children: [new PageBreak()] }));
-children.push(h1("Appendix D.  The per-session notes file"));
-children.push(p("Every session folder carries a notes file — {session name} notes.toml — created by the Post Haste template. The first draft of this paper recommended replacing a rich-text notes sheet with a structured, machine-readable format holding only what filenames cannot carry; this revision reports that recommendation implemented. The file's identity fields are gone entirely (target, rig, and date are already in the folder name), and most of what remains is filled automatically:"));
-children.push(table([2400, 1800, 5160], ["Section", "Filled by", "Contents"], [
-  ["location", "hand, once", "A key into a small locations file (site coordinates, Bortle sky-brightness class)."],
-  ["[sky]", "auto", "Moon phase, illumination percentage, and age in days — computed from the session date and the site coordinates at ingest."],
-  ["[weather]", "auto", "Temperature, humidity, dew point, cloud cover, wind, and pressure — pulled once from a historical weather service for the session's date and location; a value already present is never overwritten. Seeing and transparency remain hand-filled."],
-  ["[observation]", "hand", "Free-text notes from the night — equipment quirks, passing cloud, satellite trails. The genuinely irreplaceable field."],
-  ["[processing]", "hand", "Commentary on processing attempts — what worked, what to redo."],
-  ["[integration]", "hand (one flag)", "edited = true, the pipeline's one manual flag (Section 8)."],
-  ["[[published]] / [[printed]]", "hand, per event", "The ledger blocks of Section 10."],
-  ["[future_processing]", "hand", "Short to-do lines; the tracker aggregates them across all sessions into one queryable processing to-do list."],
-]));
-children.push(p("The format is TOML: comment-friendly, diff-friendly, and dependably parseable. The tracker reads every notes file on every scan, so a note edited on any machine is reflected in the next report with no synchronization step."));
-
-// ---- Appendix E ---------------------------------------------------------
-children.push(h1("Appendix E.  Other approaches to astrophotography data organization"));
+children.push(h1("Appendix D.  Other approaches to astrophotography data organization"));
 children.push(p("The structure described in this paper is one point in a wide design space. The approaches below are the ones most discussed in amateur communities such as Cloudy Nights and the AstroBin forums, followed by how two professional observatories handle the same problem. They are offered as a reference for readers weighing the trade-offs."));
 
 children.push(h2("E.1  Date-first hierarchy"));
@@ -490,8 +489,8 @@ children.push(h2("E.6  Professional practice: Hubble and JWST"));
 children.push(p("The Hubble Space Telescope names every dataset with a nine-character “IPPPSSOOT” rootname that encodes the instrument, proposal, observation set, and observation in fixed-width positions; each file is the rootname plus a suffix indicating its processing level — raw, calibrated, drizzled, and so on. JWST uses a comparable scheme of program and observation identifiers. In both cases the filenames are deliberately machine-oriented — the documentation states plainly that they are not designed to be scientist-friendly — and all human searching is done through the Mikulski Archive for Space Telescopes, a relational archive that indexes the opaque filenames by target name, program, instrument, exposure type, and date."));
 children.push(p("The professional lesson is the separation of two concerns: a rigid, machine-parseable identity encoded in the filename, and a separate searchable layer — a database — built on top of it. This paper's system follows the same division: self-describing folder and file names provide the rigid identity, and the SQLite tracker provides the searchable layer. The deliberate difference is one of scale. An amateur archive of under a hundred targets can afford folder names that are human-readable as well as machine-parseable, so the imager gets both and rarely needs the database for routine work. The database earns its place for the aggregate questions — integration totals, calibration coverage, pipeline state — that no single folder name can answer."));
 
-// ---- Appendix F ---------------------------------------------------------
-children.push(h1("Appendix F.  Onboarding an existing library"));
+// ---- Appendix E ---------------------------------------------------------
+children.push(h1("Appendix E.  Onboarding an existing library"));
 children.push(p("The system was not adopted on day one of a new hobby — it was retrofitted onto two years of accumulated captures. Two tools exist specifically to make that safe, and they are the first things to run against any existing library."));
 children.push(h2("F.1  The validation pass"));
 children.push(p("Every ingest ends with a validation pass over the populated database — pure observation, never modifying the library. Each finding carries a severity and a code; the taxonomy covers the ways real libraries actually drift:"));
