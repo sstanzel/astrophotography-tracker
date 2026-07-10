@@ -136,12 +136,55 @@ def load_locations(path):
     return out
 
 
+def parse_toml_tables(text, name):
+    """Parse `[[name]]` array-of-tables blocks into a list of dicts.
+
+    Zero-dependency: string, number and boolean scalar values only. A block ends
+    at the next section header of any kind.
+
+    Args:
+        text: TOML text.
+        name: the array-of-tables name (e.g. 'published').
+
+    Returns:
+        List of dicts, one per [[name]] block, in file order.
+    """
+    out, cur = [], None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == f"[[{name}]]":
+            cur = {}
+            out.append(cur)
+            continue
+        if line.startswith("["):
+            cur = None
+            continue
+        if cur is None:
+            continue
+        ms = re.match(r'(\w+)\s*=\s*"(.*?)"', line)
+        mb = re.match(r'(\w+)\s*=\s*(true|false)\s*$', line, re.I)
+        mn = re.match(r'(\w+)\s*=\s*(-?[\d.]+)\s*$', line)
+        if ms:
+            cur[ms.group(1)] = ms.group(2)
+        elif mb:
+            cur[mb.group(1)] = mb.group(2).lower() == "true"
+        elif mn:
+            cur[mn.group(1)] = mn.group(2)
+    return out
+
+
 def read_notes_toml(session_path, session_name):
-    """Return dict(present, location, moon_phase, moon_illumination, moon_age_days)
-    for a session's {name} notes.toml. Regex parse — zero dependencies."""
+    """Parse a session's `{name} notes.toml`. Regex parse — zero dependencies.
+
+    Returns a dict with sky metadata, the `edited` flag, an explicit `culled`
+    flag (for a reviewed-kept-all session), and the `[[published]]`/`[[printed]]`
+    entry lists (each a list of dicts).
+    """
     out = dict(present=False, location=None, moon_phase=None,
                moon_illumination=None, moon_age_days=None,
-               edited=False, published=False, printed=False, astrobin_url=None)
+               edited=False, culled=False, published=[], printed=[])
     p = os.path.join(session_path, f"{session_name} notes.toml")
     if not os.path.isfile(p):
         return out
@@ -150,12 +193,11 @@ def read_notes_toml(session_path, session_name):
         txt = open(p, encoding="utf-8").read()
     except OSError:
         return out
-    for flag in ("edited", "published", "printed"):
+    for flag in ("edited", "culled"):
         fm = re.search(r'^\s*' + flag + r'\s*=\s*(true|false)', txt, re.M | re.I)
         out[flag] = bool(fm) and fm.group(1).lower() == "true"
-    am = re.search(r'^\s*astrobin_url\s*=\s*"([^"]*)"', txt, re.M)
-    if am and am.group(1):
-        out["astrobin_url"] = am.group(1)
+    out["published"] = parse_toml_tables(txt, "published")
+    out["printed"] = parse_toml_tables(txt, "printed")
     m = re.search(r'^location\s*=\s*"([^"]*)"', txt, re.M)
     if m and m.group(1):
         out["location"] = m.group(1)
@@ -169,6 +211,41 @@ def read_notes_toml(session_path, session_name):
     if m:
         out["moon_age_days"] = float(m.group(1))
     return out
+
+
+def insert_publications(cur, target_id, session_id, integration_id, published, printed):
+    """Rebuild the publications rows for one session or integration.
+
+    Deletes any existing rows for that session/integration, then inserts one row
+    per [[published]] and [[printed]] entry. Source of truth is the toml lists.
+
+    Args:
+        cur: DB cursor.
+        target_id: the target the image belongs to.
+        session_id: session id, or None for an integration.
+        integration_id: integration id, or None for a session.
+        published: list of dicts (kind/url/title/date/note).
+        printed: list of dicts (title/date/note).
+    """
+    if session_id is not None:
+        cur.execute("DELETE FROM publications WHERE session_id=?", (session_id,))
+    if integration_id is not None:
+        cur.execute("DELETE FROM publications WHERE integration_id=?", (integration_id,))
+    for e in published:
+        k = (e.get("kind") or "other").lower()
+        if k not in ("astrobin", "social", "other"):
+            k = "other"
+        cur.execute("""INSERT INTO publications(target_id, session_id, integration_id,
+                       kind, url, title, published_at, notes)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (target_id, session_id, integration_id, k,
+                     e.get("url"), e.get("title"), e.get("date"), e.get("note")))
+    for e in printed:
+        cur.execute("""INSERT INTO publications(target_id, session_id, integration_id,
+                       kind, url, title, published_at, notes)
+                       VALUES(?,?,?,'print',?,?,?,?)""",
+                    (target_id, session_id, integration_id,
+                     e.get("url"), e.get("title"), e.get("date"), e.get("note")))
 
 
 def detect_method(container_path):
@@ -302,9 +379,8 @@ def read_integration_toml(path):
         "kind": s("kind"),
         "version": i("version") or 1,
         "edited": b("edited"),
-        "published": b("published"),
-        "printed": b("printed"),
-        "astrobin_url": s("astrobin_url"),
+        "published": parse_toml_tables(txt, "published"),
+        "printed": parse_toml_tables(txt, "printed"),
     }
 
 
@@ -411,6 +487,20 @@ def in_processing_area(abs_path, session_path):
         if (part in PROCESSING_DIRS or part.endswith(".pxiproject")
                 or part.endswith(" Results")):
             return True
+    return False
+
+
+def has_master_file(path):
+    """True if a produced calibration master (`master*.xisf/.fit`) sits under path.
+
+    File-based — a set 'has a master' only when the master file is actually there,
+    not because of where the folder lives. Drives the 'build masters' worklist.
+    """
+    for _r, _d, files in os.walk(path):
+        for f in files:
+            if f.lower().startswith("master") and f.lower().endswith(
+                    (".xisf", ".fit", ".fits")):
+                return True
     return False
 
 
@@ -908,17 +998,21 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   counts["dark"], counts["bias"], round(integration_s, 1),
                   unparsed, other_images, results_files,
                   1 if notes["present"] else 0,
-                  2 if rejected > 0 else 0,        # stage_culled: any rejects = culled
+                  # stage_culled: rejects pulled, OR integrated (culled at stack),
+                  # OR you explicitly marked a reviewed-kept-all session.
+                  2 if (rejected > 0 or results_files > 0 or notes["culled"]) else 0,
                   2 if results_files > 0 else 0,   # stage_integrate: results = done
                   2 if notes["edited"] else 0,
-                  2 if notes["published"] else 0,
-                  2 if notes["printed"] else 0,
-                  notes["astrobin_url"],
+                  2 if notes["published"] else 0,  # non-empty [[published]] list
+                  2 if notes["printed"] else 0,    # non-empty [[printed]] list
+                  next((e.get("url") for e in notes["published"] if e.get("url")), None),
                   hdr["site_lat"], hdr["site_lon"], hdr["instrument"],
                   hdr["telescope"], notes["location"], bortle,
                   notes["moon_age_days"], notes["moon_illumination"], notes_rel,
                   method, method, method,
                   sid))
+            insert_publications(cur, tp["target_id"], sid, None,
+                                notes["published"], notes["printed"])
 
     con.commit()
     log(f"  {library_id}: {n_targets} targets, {n_sessions} sessions, {n_frames} frames")
@@ -972,7 +1066,7 @@ def ingest_calibration(con, library_id, root, obs, log):
                 if fc == 0:
                     obs["cal_empty"].append(os.path.relpath(sp, root))
                     continue
-                is_master = 1 if "master" in sub.lower() else 0
+                is_master = 1 if has_master_file(sp) else 0
                 rel = os.path.relpath(sp, root)
                 upsert({"library_id": library_id, "class": "bias", "folder_path": rel,
                         "camera": cam, "scope": None, "temperature_c": None, "gain": None,
@@ -1003,7 +1097,7 @@ def ingest_calibration(con, library_id, root, obs, log):
                 if gm: gain = int(gm.group(1))
                 if em: exp = float(em.group(1))
             leaf = parts[-1]
-            is_master = 1 if ("master" in camroot.lower() or "library" in camroot.lower()) else 0
+            is_master = 1 if has_master_file(camroot) else 0
             fc, sz = len(real_files), sum(
                 os.path.getsize(os.path.join(camroot, f)) for f in real_files
                 if os.path.exists(os.path.join(camroot, f)))
@@ -1041,7 +1135,7 @@ def ingest_calibration(con, library_id, root, obs, log):
                         "camera": None, "scope": scope, "temperature_c": None, "gain": None,
                         "exp_s": None, "capture_date": date_of(sub),
                         "frame_count": fc, "total_size_bytes": sz,
-                        "is_generated_master": 0})
+                        "is_generated_master": 1 if has_master_file(sp) else 0})
                 n += 1
 
     con.commit()
@@ -1173,7 +1267,8 @@ def ingest_integrations(con, library_id, root, obs, log):
                   man["span"], man["version"], sessions_available,
                   mode, man["goal_hours"], method,
                   2 if man["edited"] else 0, 2 if man["published"] else 0,
-                  2 if man["printed"] else 0, rfiles, man["astrobin_url"]))
+                  2 if man["printed"] else 0, rfiles,
+                  next((e.get("url") for e in man["published"] if e.get("url")), None)))
             iid = cur.execute("SELECT integration_id FROM integrations "
                               "WHERE folder_path=?", (rel,)).fetchone()[0]
             cur.execute("DELETE FROM integration_members WHERE integration_id=?", (iid,))
@@ -1181,6 +1276,8 @@ def ingest_integrations(con, library_id, root, obs, log):
                 cur.execute("INSERT OR IGNORE INTO integration_members"
                             "(integration_id, session_id, in_build) VALUES(?,?,?)",
                             (iid, sid, in_build))
+            insert_publications(cur, tp["target_id"], None, iid,
+                                man["published"], man["printed"])
             n += 1
     con.commit()
     log(f"  {library_id}: {n} integrations")

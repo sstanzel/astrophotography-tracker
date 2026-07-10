@@ -271,18 +271,24 @@ CREATE INDEX idx_cal_scope_sens  ON calibration_masters(scope, camera);
 -- -- publications -------------------------------------------------------------
 -- AstroBin posts, prints, social shares. Per-target rather than per-session
 -- because publishing happens after integration.
+-- One row per publish/print event. The finished image can be a single session
+-- (session_id set) or a multi-session integration (integration_id set); one of
+-- them is set (or neither for a target-level note). Multi-entry: a target may
+-- have many. Source of truth is the [[published]]/[[printed]] blocks in the
+-- session's notes.toml / integration.toml; ingest rebuilds this table from them.
 CREATE TABLE publications (
     publication_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     target_id           TEXT NOT NULL REFERENCES targets(target_id),
-    session_id          INTEGER REFERENCES sessions(session_id),  -- set when the
-                          -- publication is a single-session image rather than a
-                          -- multi-session target master; NULL for the usual case
+    session_id          INTEGER REFERENCES sessions(session_id) ON DELETE CASCADE,
+    integration_id      INTEGER REFERENCES integrations(integration_id) ON DELETE CASCADE,
     kind                TEXT NOT NULL CHECK (kind IN ('astrobin','print','social','other')),
     url                 TEXT,
-    title               TEXT,
+    title               TEXT,       -- label / where (e.g. "DAS ASIG", "16x24 metal")
     published_at        DATE,
     notes               TEXT
 );
+CREATE INDEX idx_publications_target ON publications(target_id);
+CREATE INDEX idx_publications_kind   ON publications(kind);
 
 CREATE INDEX idx_pub_target  ON publications(target_id);
 CREATE INDEX idx_pub_session ON publications(session_id);
