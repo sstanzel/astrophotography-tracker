@@ -101,7 +101,7 @@ def main():
     # E Scope F Sensor G SessionDate H Year I Lights J Rejected K Flats
     # L DarkFlats M Darks N Bias O Integration P Capture Q Blink R Calibrate
     # S OtherCapture T FolderPath
-    s_headers = ["Library", "Target ID", "Catalog", "Common Name", "Scope", "Sensor",
+    s_headers = ["Library", "Target ID", "Catalog", "Name", "Scope", "Sensor",
                  "Session Date", "Year", "Lights", "Rejected", "Flats", "Dark Flats",
                  "Darks", "Bias", "Integration (hrs)", "Stage", "Method",
                  "Culled", "Other Capture", "Integrate", "Edit", "Publish",
@@ -142,7 +142,7 @@ def main():
         c.font = BOLD_FONT
         c.fill = PatternFill("solid", start_color=TOTAL_BG)
         if col == 15:
-            c.number_format = "0.00"
+            c.number_format = "0"
     for col in range(1, len(s_headers) + 1):
         ws.cell(row=tr, column=col).fill = PatternFill("solid", start_color=TOTAL_BG)
 
@@ -151,7 +151,7 @@ def main():
     # columns are derived from the target's sessions (single-session
     # integrations) and its multi-session integrations.
     wt = wb.create_sheet("Targets")
-    t_headers = ["Target ID", "Catalog", "Common Name", "Sessions", "Lifetime Hrs",
+    t_headers = ["Target ID", "Catalog", "Name", "Sessions", "Lifetime Hrs",
                  "2024 Hrs", "2025 Hrs", "2026 Hrs", "Lights", "Scopes Used",
                  "First Session", "Last Session", "Integrations",
                  "Sessions Published", "Integ. Published", "Furthest Stage",
@@ -224,7 +224,7 @@ def main():
             if row % 2 == 0:
                 cell.fill = PatternFill("solid", start_color=BAND_BG)
             if c in (5, 6, 7, 8, 18):
-                cell.number_format = "0.00"
+                cell.number_format = "0"
             if c == 19:
                 cell.number_format = "0.0%"
     wt.freeze_panes = "A2"
@@ -255,8 +255,8 @@ def main():
         ])
     write_sheet(wc, c_headers, c_rows)
     # colour the Status column
-    status_colors = {"NO MASTER": "F4CCCC", "STALE (new raw)": "FCE5CD",
-                     "STALE (age)": "FCE5CD", "OK": "D9EAD3"}
+    status_colors = {"no master": "FCE5CD", "stale (new raw)": "FFF2CC",
+                     "stale (age)": "FFF2CC", "ok": "D9EAD3"}
     for r in range(2, len(c_rows) + 2):
         st = wc.cell(row=r, column=10).value
         if st in status_colors:
@@ -276,8 +276,8 @@ def main():
               for r in cur.execute("""
                   SELECT * FROM v_light_calibration_coverage
                   ORDER BY camera, gain, exp_s""")]
-    write_sheet(wl, l_headers, l_rows, col_formats={5: "0.00"})
-    cov_colors = {"TO SHOOT": "F4CCCC", "TO BUILD": "FCE5CD", "OK": "D9EAD3"}
+    write_sheet(wl, l_headers, l_rows, col_formats={5: "0"})
+    cov_colors = {"to shoot": "FCE5CD", "to build": "FFF2CC", "ok": "D9EAD3"}
     for r in range(2, len(l_rows) + 2):
         for col in (11, 12):
             st = wl.cell(row=r, column=col).value
@@ -310,7 +310,7 @@ def main():
                    if r["goal_hours"] else None)
             state = ("Stale (+%d)" % (r["sessions_available"] - r["sessions_built"])
                      if r["is_stale"] else "Current")
-            i_rows.append([r["common_name"] or r["target_id"], r["kind"],
+            i_rows.append([r["target_id"], r["kind"],
                            r["rig"], r["span"],
                            r["built_hours"], r["available_hours"], r["goal_hours"],
                            pct, r["sessions_built"], r["sessions_available"],
@@ -356,7 +356,7 @@ def main():
     wsum["A2"] = f"Generated {datetime.datetime.now():%Y-%m-%d %H:%M} from tracker.db"
     wsum["A2"].font = Font(name=FONT, italic=True, size=9, color="888888")
     metrics = [
-        ("Deep-sky integration (hours)", f'=SUMIFS(Sessions!$O$2:$O${n+1},Sessions!$S$2:$S${n+1},"No")', "0.00"),
+        ("Deep-sky integration (hours)", f'=SUMIFS(Sessions!$O$2:$O${n+1},Sessions!$S$2:$S${n+1},"No")', "0"),
         ("Deep-sky sessions",            f'=COUNTIF(Sessions!$S$2:$S${n+1},"No")', "0"),
         ("Other-capture sessions",       f'=COUNTIF(Sessions!$S$2:$S${n+1},"Yes")', "0"),
         ("Kept light frames",            f'=SUM(Sessions!$I$2:$I${n+1})', "#,##0"),
@@ -364,7 +364,7 @@ def main():
         ("Distinct targets",             f'=COUNTA(Targets!$A$2:$A${len(t_rows)+1})', "0"),
         ("Calibration sets tracked",     f'=COUNTA(Calibration!$A$2:$A${len(c_rows)+1})', "0"),
         ("Calibration items needing attention",
-                                         '=COUNTIF(Calibration!$J:$J,"NO MASTER")+COUNTIF(Calibration!$J:$J,"STALE (new raw)")+COUNTIF(Calibration!$J:$J,"STALE (age)")', "0"),
+                                         '=COUNTIF(Calibration!$J:$J,"no master")+COUNTIF(Calibration!$J:$J,"stale (new raw)")+COUNTIF(Calibration!$J:$J,"stale (age)")', "0"),
         ("Multi-session integrations",   n_integ, "0"),
         ("Validation findings (error + warning)", n_findings, "0"),
     ]

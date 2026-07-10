@@ -693,11 +693,70 @@ def apply_migrations(con):
         GROUP BY target_id, scope, sensor, span
         HAVING COUNT(*) > 1;
 
+        -- Calibration needs (kept in lockstep with schema.sql — recreated
+        -- here so status wording changes reach existing DBs).
+        DROP VIEW IF EXISTS v_calibration_needs;
+        CREATE VIEW v_calibration_needs AS
+        WITH raw_rollup AS (
+            SELECT class, camera, scope, temperature_c, gain, exp_s,
+                   COUNT(*)            AS raw_sets,
+                   SUM(frame_count)    AS raw_frames,
+                   MAX(capture_date)   AS newest_raw
+            FROM calibration_masters
+            WHERE NOT is_generated_master
+            GROUP BY class, camera, scope, temperature_c, gain, exp_s
+        ),
+        master_rollup AS (
+            SELECT class, camera, scope, temperature_c, gain, exp_s,
+                   MAX(COALESCE(generated_at, capture_date)) AS master_date
+            FROM calibration_masters
+            WHERE is_generated_master
+            GROUP BY class, camera, scope, temperature_c, gain, exp_s
+        ),
+        resolved AS (
+            SELECT
+                r.class, r.camera, r.scope, r.temperature_c, r.gain, r.exp_s,
+                r.raw_sets, r.raw_frames, r.newest_raw,
+                m.master_date,
+                COALESCE(
+                  (SELECT min_frames FROM calibration_thresholds t
+                   WHERE t.class=r.class AND t.camera IS r.camera
+                     AND t.temperature_c IS r.temperature_c AND t.gain IS r.gain AND t.exp_s IS r.exp_s),
+                  (SELECT min_frames FROM calibration_thresholds t
+                   WHERE t.class=r.class AND t.camera IS NULL AND t.scope IS NULL)
+                ) AS min_frames,
+                COALESCE(
+                  (SELECT refresh_days FROM calibration_thresholds t
+                   WHERE t.class=r.class AND t.camera IS r.camera
+                     AND t.temperature_c IS r.temperature_c AND t.gain IS r.gain AND t.exp_s IS r.exp_s),
+                  (SELECT refresh_days FROM calibration_thresholds t
+                   WHERE t.class=r.class AND t.camera IS NULL AND t.scope IS NULL)
+                ) AS refresh_days
+            FROM raw_rollup r
+            LEFT JOIN master_rollup m
+              ON m.class=r.class AND m.camera IS r.camera AND m.scope IS r.scope
+             AND m.temperature_c IS r.temperature_c AND m.gain IS r.gain AND m.exp_s IS r.exp_s
+        )
+        SELECT
+            class, camera, scope, temperature_c, gain, exp_s,
+            raw_sets, raw_frames, newest_raw, master_date, min_frames, refresh_days,
+            CASE
+              WHEN class='flat' THEN 'n/a (per-session)'
+              WHEN master_date IS NULL THEN 'no master'
+              WHEN newest_raw > master_date THEN 'stale (new raw)'
+              WHEN refresh_days IS NOT NULL
+                   AND julianday(date('now')) - julianday(master_date) > refresh_days
+                THEN 'stale (age)'
+              ELSE 'ok'
+            END AS status,
+            CASE WHEN raw_frames < min_frames THEN 1 ELSE 0 END AS below_threshold
+        FROM resolved;
+
         -- Light↔calibration coverage (full rationale in schema.sql): per
         -- (camera, gain, exposure) combo the kept lights use, is there
         -- matching dark data (±5 °C set temperature; a set with no
         -- temperature folder matches any) and bias data (per camera)?
-        -- OK = mastered, TO BUILD = raws only, TO SHOOT = missing.
+        -- ok = mastered, to build = raws only, to shoot = missing.
         DROP VIEW IF EXISTS v_light_calibration_coverage;
         CREATE VIEW v_light_calibration_coverage AS
         WITH lf AS (
@@ -735,15 +794,15 @@ def apply_migrations(con):
             SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) AS subs_dark_raw,
             SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END)                  AS subs_dark_none,
             CASE
-              WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'TO SHOOT'
+              WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'to shoot'
               WHEN SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) > 0
-                THEN 'TO BUILD'
-              ELSE 'OK'
+                THEN 'to build'
+              ELSE 'ok'
             END AS dark_status,
             CASE
-              WHEN bm.camera IS NULL THEN 'TO SHOOT'
-              WHEN bm.bi_master = 0  THEN 'TO BUILD'
-              ELSE 'OK'
+              WHEN bm.camera IS NULL THEN 'to shoot'
+              WHEN bm.bi_master = 0  THEN 'to build'
+              ELSE 'ok'
             END AS bias_status
         FROM lf
         JOIN dark_match dm USING (frame_id)

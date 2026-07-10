@@ -21,42 +21,42 @@ ACTIONS = ("cull", "integrate", "edit", "restack", "capture", "masters",
 
 QUERIES = {
     "cull": ("Sessions to cull (captured, not yet reviewed)", """
-        SELECT t.common_name AS target, s.session_date AS date, s.scope, s.sensor,
+        SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
                s.lights_kept AS lights, s.lights_rejected AS rej,
-               ROUND(s.integration_s/3600.0,2) AS hrs
-        FROM sessions s JOIN targets t USING(target_id)
+               s.integration_s/3600.0 AS hrs
+        FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
         WHERE NOT s.is_other_capture AND vp.furthest_stage='1 Captured'
         ORDER BY s.session_date DESC"""),
     "integrate": ("Sessions to integrate (culled, not yet stacked)", """
-        SELECT t.common_name AS target, s.session_date AS date, s.scope, s.sensor,
-               s.lights_kept AS lights, ROUND(s.integration_s/3600.0,2) AS hrs
-        FROM sessions s JOIN targets t USING(target_id)
+        SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
+               s.lights_kept AS lights, s.integration_s/3600.0 AS hrs
+        FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
         WHERE NOT s.is_other_capture AND vp.furthest_stage='2 Culled'
         ORDER BY s.session_date DESC"""),
     "edit": ("Finished images to edit (integrated, not edited)", """
-        SELECT t.common_name AS target, s.session_date||' '||s.scope||' '||s.sensor AS image,
-               'session' AS type, ROUND(s.integration_s/3600.0,2) AS hrs
-        FROM sessions s JOIN targets t USING(target_id)
+        SELECT s.target_id AS target, s.session_date||' '||s.scope||' '||s.sensor AS image,
+               'session' AS type, s.integration_s/3600.0 AS hrs
+        FROM sessions s
         WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
         UNION ALL
-        SELECT t.common_name, i.folder_name, 'integration',
-               (SELECT ROUND(SUM(ss.integration_s)/3600.0,2) FROM integration_members im
+        SELECT i.target_id, i.folder_name, 'integration',
+               (SELECT SUM(ss.integration_s)/3600.0 FROM integration_members im
                 JOIN sessions ss ON ss.session_id=im.session_id
                 WHERE im.integration_id=i.integration_id)
-        FROM integrations i JOIN targets t USING(target_id) WHERE i.stage_edit<2
+        FROM integrations i WHERE i.stage_edit<2
         ORDER BY hrs DESC"""),
     "restack": ("Integrations to restack (new data since last stack)", """
-        SELECT common_name AS target, folder_name AS integration,
+        SELECT target_id AS target, folder_name AS integration,
                built_hours AS built, available_hours AS avail,
-               ROUND(available_hours-built_hours,2) AS behind
+               available_hours-built_hours AS behind
         FROM v_integration_overview WHERE is_stale=1 ORDER BY behind DESC"""),
     "capture": ("Targets to capture more of (under goal, or planned)", """
-        SELECT t.common_name AS target,
-               ROUND(COALESCE(SUM(s.integration_s),0)/3600.0,1) AS hrs,
+        SELECT t.target_id AS target,
+               COALESCE(SUM(s.integration_s),0)/3600.0 AS hrs,
                g.goal_hours AS goal,
-               ROUND(g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0,1) AS gap,
+               g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0 AS gap,
                g.priority AS prio
         FROM targets t
         LEFT JOIN sessions s ON s.target_id=t.target_id AND NOT s.is_other_capture
@@ -75,16 +75,56 @@ QUERIES = {
         SELECT camera, gain, exp_s AS exp, light_subs AS subs, hours,
                subs_dark_none AS no_dark, dark_status AS dark, bias_status AS bias
         FROM v_light_calibration_coverage
-        WHERE dark_status != 'OK' OR bias_status != 'OK'
+        WHERE dark_status != 'ok' OR bias_status != 'ok'
         ORDER BY camera, gain, exp_s"""),
 }
 
 
+# --- display formatting (see STYLE.md) --------------------------------------
+def fmt_hm(hours):
+    """Hours as 'Xh Ym' (per-item breakdowns); whole hours show as 'Xh'."""
+    if hours is None:
+        return ""
+    total_min = round(hours * 60)
+    h, m = divmod(total_min, 60)
+    if not h:
+        return f"{m}m"
+    return f"{h}h {m:02d}m" if m else f"{h}h"
+
+
+def fmt_h(hours):
+    """Hours rounded to the nearest whole hour (summaries and totals)."""
+    return "" if hours is None else str(round(hours))
+
+
+def fmt_exp(exp):
+    """Exposure seconds without a trailing .0; decimals only when meaningful."""
+    if exp is None:
+        return ""
+    return str(int(exp)) if float(exp) == int(exp) else str(exp)
+
+
+# per-action column formatters, keyed by the SQL column alias
+FORMATTERS = {
+    "cull":      {"hrs": fmt_hm},
+    "integrate": {"hrs": fmt_hm},
+    "edit":      {"hrs": fmt_hm},
+    "restack":   {"built": fmt_hm, "avail": fmt_hm, "behind": fmt_hm},
+    "capture":   {"hrs": fmt_h, "goal": fmt_h, "gap": fmt_h},
+    "masters":   {"exp": fmt_exp},
+    "coverage":  {"exp": fmt_exp, "hours": fmt_h},
+}
+
+
 def fetch(cur, key):
-    """Return (title, column names, rows) for one worklist key."""
+    """Return (title, column names, display-formatted rows) for one worklist key."""
     title, sql = QUERIES[key]
     cur.execute(sql)
-    return title, [d[0] for d in cur.description], cur.fetchall()
+    headers = [d[0] for d in cur.description]
+    fmts = FORMATTERS.get(key, {})
+    data = [[fmts[h](v) if h in fmts else v for h, v in zip(headers, row)]
+            for row in cur.fetchall()]
+    return title, headers, data
 
 
 def print_table(headers, data):
@@ -116,13 +156,18 @@ def main():
     con = sqlite3.connect(args.db)
     cur = con.cursor()
 
-    if args.action == "summary":
+    def print_summary():
         print("Work Queue")
         for key in ACTIONS:
             title, _h, data = fetch(cur, key)
             print(f"  {len(data):4}  {title}")
+
+    if args.action == "summary":
+        print_summary()
         print("\nRun 'worklist.py <action>' for a list, or 'all' for everything.")
     else:
+        if args.action == "all":
+            print_summary()
         keys = ACTIONS if args.action == "all" else (args.action,)
         for key in keys:
             title, headers, data = fetch(cur, key)

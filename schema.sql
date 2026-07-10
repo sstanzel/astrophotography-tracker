@@ -568,7 +568,7 @@ WHERE s.lights_kept = 0
 
 -- Calibration needs: for each raw calibration combo, resolve the applicable
 -- threshold, count raw frames, find the most recent generated master, and
--- classify the combo as NO MASTER / BELOW THRESHOLD / STALE / OK.
+-- classify the combo as no master / below threshold / stale / ok.
 CREATE VIEW v_calibration_needs AS
 WITH raw_rollup AS (
     SELECT class, camera, scope, temperature_c, gain, exp_s,
@@ -615,13 +615,13 @@ SELECT
     class, camera, scope, temperature_c, gain, exp_s,
     raw_sets, raw_frames, newest_raw, master_date, min_frames, refresh_days,
     CASE
-      WHEN class='flat' THEN 'N/A (per-session)'   -- flats aren't mastered into the library
-      WHEN master_date IS NULL THEN 'NO MASTER'
-      WHEN newest_raw > master_date THEN 'STALE (new raw)'
+      WHEN class='flat' THEN 'n/a (per-session)'   -- flats aren't mastered into the library
+      WHEN master_date IS NULL THEN 'no master'
+      WHEN newest_raw > master_date THEN 'stale (new raw)'
       WHEN refresh_days IS NOT NULL
            AND julianday(date('now')) - julianday(master_date) > refresh_days
-        THEN 'STALE (age)'
-      ELSE 'OK'
+        THEN 'stale (age)'
+      ELSE 'ok'
     END AS status,
     CASE WHEN raw_frames < min_frames THEN 1 ELSE 0 END AS below_threshold
 FROM resolved;
@@ -673,15 +673,15 @@ SELECT
     SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) AS subs_dark_raw,
     SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END)                  AS subs_dark_none,
     CASE
-      WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'TO SHOOT'
+      WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'to shoot'
       WHEN SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) > 0
-        THEN 'TO BUILD'
-      ELSE 'OK'
+        THEN 'to build'
+      ELSE 'ok'
     END AS dark_status,
     CASE
-      WHEN bm.camera IS NULL THEN 'TO SHOOT'
-      WHEN bm.bi_master = 0  THEN 'TO BUILD'
-      ELSE 'OK'
+      WHEN bm.camera IS NULL THEN 'to shoot'
+      WHEN bm.bi_master = 0  THEN 'to build'
+      ELSE 'ok'
     END AS bias_status
 FROM lf
 JOIN dark_match dm USING (frame_id)

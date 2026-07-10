@@ -46,13 +46,13 @@ def main():
     data = {
         "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "kpis": {
-            "hours": scalar("SELECT ROUND(SUM(integration_s)/3600.0,1) FROM sessions WHERE NOT is_other_capture"),
+            "hours": scalar("SELECT ROUND(SUM(integration_s)/3600.0) FROM sessions WHERE NOT is_other_capture"),
             "deepSkySessions": scalar("SELECT COUNT(*) FROM sessions WHERE NOT is_other_capture"),
             "otherSessions": scalar("SELECT COUNT(*) FROM sessions WHERE is_other_capture"),
             "targetsImaged": scalar("SELECT COUNT(DISTINCT target_id) FROM sessions WHERE lights_kept>0 AND NOT is_other_capture"),
             "keptLights": scalar("SELECT COUNT(*) FROM frames WHERE frame_type='light' AND NOT is_rejected"),
             "calSets": scalar("SELECT COUNT(*) FROM calibration_masters"),
-            "calNeeds": scalar("SELECT COUNT(*) FROM v_calibration_needs WHERE status IN ('NO MASTER','STALE (new raw)','STALE (age)')"),
+            "calNeeds": scalar("SELECT COUNT(*) FROM v_calibration_needs WHERE status IN ('no master','stale (new raw)','stale (age)')"),
             "integrations": (scalar("SELECT COUNT(*) FROM integrations")
                              if has_integrations else 0),
             "unpublishedTargets": (scalar("SELECT COUNT(*) FROM v_targets_unpublished")
@@ -62,10 +62,10 @@ def main():
                                  if has_validation else 0),
         },
         "byYear": rows("""SELECT substr(session_date,1,4) AS year, COUNT(*) AS sessions,
-                                 ROUND(SUM(integration_s)/3600.0,1) AS hours
+                                 ROUND(SUM(integration_s)/3600.0) AS hours
                           FROM sessions WHERE NOT is_other_capture
                           GROUP BY year ORDER BY year"""),
-        "topTargets": rows("""SELECT catalog_id AS name, hours_lifetime AS hours, sessions
+        "topTargets": rows("""SELECT catalog_id AS name, ROUND(hours_lifetime) AS hours, sessions
                               FROM v_target_lifetime
                               WHERE hours_lifetime > 0
                               ORDER BY hours_lifetime DESC LIMIT 15"""),
@@ -214,13 +214,13 @@ def main():
                        WHERE NOT s.is_other_capture AND vp.furthest_stage='{stage}'
                        ORDER BY s.session_date DESC""")
     edit_rows = rows("""
-        SELECT t.common_name, (s.session_date||'  '||s.scope||' '||s.sensor) AS image,
+        SELECT s.target_id, (s.session_date||'  '||s.scope||' '||s.sensor) AS image,
                'session' AS type, ROUND(s.integration_s/3600.0,2) AS hours,
                COALESCE(s.integration_method,'') AS method
         FROM sessions s JOIN targets t USING(target_id)
         WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
         UNION ALL
-        SELECT t.common_name, i.folder_name AS image, 'integration' AS type,
+        SELECT i.target_id, i.folder_name AS image, 'integration' AS type,
                ROUND(SUM(mem.integration_s)/3600.0,2) AS hours,
                COALESCE(i.integration_method,'') AS method
         FROM integrations i JOIN targets t USING(target_id)
@@ -233,14 +233,14 @@ def main():
         "cull": sess_at("1 Captured"),
         "integrate": sess_at("2 Culled"),
         "edit": edit_rows,
-        "restack": rows("""SELECT common_name, folder_name,
+        "restack": rows("""SELECT target_id, folder_name,
                                   COALESCE(built_hours,0) AS built_hours,
                                   COALESCE(available_hours,0) AS available_hours,
                                   ROUND(COALESCE(available_hours,0)-COALESCE(built_hours,0),2) AS behind
                            FROM v_integration_overview WHERE is_stale=1
                            ORDER BY behind DESC""") if has_integrations else [],
         "capture": rows("""
-            SELECT t.common_name,
+            SELECT t.target_id,
                    ROUND(COALESCE(SUM(s.integration_s),0)/3600.0,1) AS hours,
                    g.goal_hours AS goal,
                    ROUND(g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0,1) AS gap,
@@ -277,7 +277,7 @@ def main():
         LEFT JOIN sessions s ON s.session_id=p.session_id
         WHERE p.kind='print' ORDER BY p.published_at DESC, t.common_name""")
     data["todos"] = rows("""
-        SELECT pt.todo, t.common_name AS target,
+        SELECT pt.todo, t.target_id AS target,
                s.scope||' '||s.sensor AS rig, s.session_date AS date
         FROM processing_todos pt
         JOIN sessions s ON s.session_id=pt.session_id
@@ -437,7 +437,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div id="calCovSummary" class="sub" style="margin-bottom:8px"></div>
   <div class="sub" style="margin-bottom:8px">Every camera / gain / exposure combo your kept lights use, matched against the
   library's darks (same camera+gain+exposure, set temperature within &plusmn;5&nbsp;&deg;C; untracked-temperature sets match any)
-  and bias (per camera). <b>OK</b> = a built master covers every sub &middot; <b>to build</b> = raws on hand, master not built
+  and bias (per camera). <b>ok</b> = a built master covers every sub &middot; <b>to build</b> = raws on hand, master not built
   &middot; <b>to shoot</b> = some subs have no matching calibration data. Flats are per-session by design and not matched here.</div>
   <div style="margin-bottom:10px"><input type="search" id="covfilter" placeholder="filter by camera, status..."></div>
   <div class="scroll"><table id="covTable"></table></div>
@@ -454,6 +454,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script>
 const D = /*DATA*/;
 document.getElementById("gen").textContent = "Generated " + D.generated + " from tracker.db";
+
+// ---- display formatting (see STYLE.md) ----
+// hours: summaries/totals round to the nearest hour; per-item breakdowns
+// show hours + minutes. exposures: no trailing .0.
+function fmtH(v){ return v==null ? "" : String(Math.round(v)); }
+function fmtHM(v){ if(v==null) return "";
+  const t=Math.round(v*60), h=Math.floor(t/60), m=t%60;
+  return h ? (m ? h+"h "+String(m).padStart(2,"0")+"m" : h+"h") : m+"m"; }
+function fmtExp(v){ return v==null ? "" : (v%1===0 ? String(Math.round(v)) : String(v)); }
 
 // ---- KPI cards ----
 const kpiDefs = [
@@ -563,12 +572,12 @@ stageTable("sessionPipeline", D.sessionPipeline);
         : "";
       const state = r.is_stale
         ? `<span class="pill warn">⚠ ${r.sessions_available-r.sessions_built} new `+
-          `(${(r.available_hours-r.built_hours).toFixed(1)} h)</span>`
+          `(${fmtHM(r.available_hours-r.built_hours)})</span>`
         : `<span class="pill good">✓ current</span>`;
       return `<tr><td>${r.common_name||r.target_id}</td>`+
       `<td>${r.rig}</td><td>${r.span||""}</td>`+
-      `<td class="num">${r.built_hours.toFixed(1)}</td>`+
-      `<td class="num">${r.available_hours.toFixed(1)}</td>`+
+      `<td class="num">${fmtHM(r.built_hours)}</td>`+
+      `<td class="num">${fmtHM(r.available_hours)}</td>`+
       `<td class="num">${r.goal_hours??""}</td>`+
       `<td>${prog}</td>`+
       `<td>${r.data_through||""}</td>`+
@@ -581,7 +590,7 @@ stageTable("sessionPipeline", D.sessionPipeline);
 // ---- targets table (totals; expandable sessions; filter + sort) ----
 (function(){
   const cols = [
-    ["target_id","Target"],["common_name","Name"],["sessions","Sessions","num"],
+    ["target_id","Target ID"],["common_name","Name"],["sessions","Sessions","num"],
     ["lights","Lights","num"],["hours","Hrs","num"],["dates","Dates"],
     ["goal_hours","Goal","num"],["goal_pct","Progress","num"],
   ];
@@ -602,7 +611,7 @@ stageTable("sessionPipeline", D.sessionPipeline);
     if(!ss.length) return `<tr class="detail"><td colspan="${cols.length+1}" class="sub">no sessions yet</td></tr>`;
     return `<tr class="detail"><td></td><td colspan="${cols.length}"><table class="mini"><thead><tr>`+
       SCOLS.map(c=>`<th>${c[1]}</th>`).join("")+"</tr></thead><tbody>"+
-      ss.map(s=>"<tr>"+SCOLS.map(c=>`<td class="${c[2]==='num'?'num':''}">${s[c[0]]??''}</td>`).join("")+"</tr>").join("")+
+      ss.map(s=>"<tr>"+SCOLS.map(c=>`<td class="${c[2]==='num'?'num':''}">${c[0]==="hours"?fmtHM(s.hours):(s[c[0]]??'')}</td>`).join("")+"</tr>").join("")+
       "</tbody></table></td></tr>";
   };
   function render(filter){
@@ -617,7 +626,7 @@ stageTable("sessionPipeline", D.sessionPipeline);
       rows.map(r=>{
         const isOpen=open.has(r.target_id), nSess=(byTarget[r.target_id]||[]).length;
         const prog=(r.goal_hours>0)?`<div class="bar"><span style="width:${r.goal_pct}%"></span></div> ${r.goal_pct}%`:"";
-        const cell=c=> c[0]==="hours" ? r.hours.toFixed(1)
+        const cell=c=> c[0]==="hours" ? fmtH(r.hours)
                      : c[0]==="goal_pct" ? prog
                      : (r[c[0]]??"");
         const main=`<tr class="trow" data-t="${r.target_id}"><td class="tog">${nSess?(isOpen?"▾":"▸"):""}</td>`+
@@ -665,12 +674,12 @@ function sortableTable(tblEl, cols, data, opts){
 (function(){
   const WL = D.worklists || {};
   const SPEC = {
-    cull:      {label:"To cull",      cols:[["common_name","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rej.","num"],["qc_flags","QC flags","num"],["hours","Hrs","num"]]},
-    integrate: {label:"To integrate", cols:[["common_name","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hrs","num"]]},
-    edit:      {label:"To edit",      cols:[["common_name","Target"],["image","Image"],["type","Type"],["hours","Hrs","num"],["method","Method"]]},
-    restack:   {label:"Restack",      cols:[["common_name","Target"],["folder_name","Integration"],["built_hours","Built","num"],["available_hours","Avail","num"],["behind","Behind h","num"]]},
-    capture:   {label:"Capture more", cols:[["common_name","Target"],["hours","Hrs","num"],["goal","Goal","num"],["gap","Gap","num"],["priority","Prio","num"]]},
-    masters:   {label:"Build masters",cols:[["class","Class"],["camera","Camera"],["temp","Temp","num"],["gain","Gain","num"],["exp","Exp s","num"],["frames","Frames","num"]]},
+    cull:      {label:"To cull",      cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rej.","num"],["qc_flags","QC flags","num"],["hours","Hrs","num",r=>fmtHM(r.hours)]]},
+    integrate: {label:"To integrate", cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hrs","num",r=>fmtHM(r.hours)]]},
+    edit:      {label:"To edit",      cols:[["target_id","Target"],["image","Image"],["type","Type"],["hours","Hrs","num",r=>fmtHM(r.hours)],["method","Method"]]},
+    restack:   {label:"Restack",      cols:[["target_id","Target"],["folder_name","Integration"],["built_hours","Built","num",r=>fmtHM(r.built_hours)],["available_hours","Avail","num",r=>fmtHM(r.available_hours)],["behind","Behind","num",r=>fmtHM(r.behind)]]},
+    capture:   {label:"Capture more", cols:[["target_id","Target"],["hours","Hrs","num",r=>fmtH(r.hours)],["goal","Goal","num",r=>fmtH(r.goal)],["gap","Gap","num",r=>fmtH(r.gap)],["priority","Prio","num"]]},
+    masters:   {label:"Build masters",cols:[["class","Class"],["camera","Camera"],["temp","Temp","num"],["gain","Gain","num"],["exp","Exp s","num",r=>fmtExp(r.exp)],["frames","Frames","num"]]},
   };
   const order = ["cull","integrate","edit","restack","capture","masters"];
   let action = order.find(a=>(WL[a]||[]).length) || "cull";
@@ -703,11 +712,11 @@ function sortableTable(tblEl, cols, data, opts){
 (function(){
   const link = r => r.url ? `<a href="${r.url}" target="_blank">${r.title||r.url}</a>` : (r.title||"");
   sortableTable(document.getElementById("pubTable"),
-    [["common_name","Target"],["image","Image"],["kind","Where"],
+    [["target_id","Target"],["image","Image"],["kind","Where"],
      ["title","Link",null,link],["published_at","Date"]],
     D.published||[], {sortKey:"published_at",sortDir:-1})("");
   sortableTable(document.getElementById("printTable"),
-    [["common_name","Target"],["image","Image"],["title","Print"],["published_at","Date"]],
+    [["target_id","Target"],["image","Image"],["title","Print"],["published_at","Date"]],
     D.printed||[], {sortKey:"published_at",sortDir:-1})("");
 })();
 
@@ -721,7 +730,7 @@ function sortableTable(tblEl, cols, data, opts){
     "<th>Progress</th></tr></thead><tbody>" +
     D.progress.map(r=>{
       const pct = r.goal>0 ? Math.min(100, 100*r.hours/r.goal) : 0;
-      return `<tr><td>${r.name}</td><td class="num">${r.hours}</td>`+
+      return `<tr><td>${r.name}</td><td class="num">${fmtH(r.hours)}</td>`+
         `<td class="num">${r.goal??''}</td>`+
         `<td><div class="bar"><span style="width:${pct}%"></span></div> `+
         `${pct.toFixed(0)}%</td></tr>`;
@@ -731,16 +740,16 @@ function sortableTable(tblEl, cols, data, opts){
 // ---- calibration ----
 (function(){
   function pill(s){
-    if(s==='OK') return '<span class="pill good">OK</span>';
-    if(s==='NO MASTER') return '<span class="pill todo">to build</span>';
-    if(s && s.startsWith('STALE')) return `<span class="pill warn">${s}</span>`;
-    if(s && s.startsWith('N/A')) return '<span class="pill na">N/A</span>';
+    if(s==='ok') return '<span class="pill good">ok</span>';
+    if(s==='no master') return '<span class="pill todo">to build</span>';
+    if(s && s.startsWith('stale')) return `<span class="pill warn">${s}</span>`;
+    if(s && s.startsWith('n/a')) return '<span class="pill na">n/a</span>';
     return s||'';
   }
   // coverage summary
   const cal = D.calibration||[];
-  const c = s => cal.filter(r=>r.status===s || (s==='STALE'&&(r.status||'').startsWith('STALE'))).length;
-  const toBuild=c('NO MASTER'), stale=c('STALE'), ok=c('OK'), na=c('N/A (per-session)');
+  const c = s => cal.filter(r=>r.status===s || (s==='stale'&&(r.status||'').startsWith('stale'))).length;
+  const toBuild=c('no master'), stale=c('stale'), ok=c('ok'), na=c('n/a (per-session)');
   document.getElementById("calSummary").innerHTML =
     `<span class="pill todo">${toBuild} to build</span> `+
     (stale?`<span class="pill warn">${stale} stale</span> `:"")+
@@ -759,7 +768,7 @@ function sortableTable(tblEl, cols, data, opts){
   const fbox = document.getElementById("calfilter");
   const draw = sortableTable(document.getElementById("calTable"),
     [["class","Class"],["rig","Rig"],["temp","Temp","num"],["gain","Gain","num"],
-     ["exp","Exp","num"],["raw_sets","Raw sets","num"],["raw_frames","Raw frames","num"],
+     ["exp","Exp","num",r=>fmtExp(r.exp)],["raw_sets","Raw sets","num"],["raw_frames","Raw frames","num"],
      ["master_date","Master"],["status","Status",null,r=>pill(r.status)]],
     cal, {sortKey:"status",sortDir:1,getFilter:()=>fbox.value});
   draw("");
@@ -770,14 +779,14 @@ function sortableTable(tblEl, cols, data, opts){
 (function(){
   const cov = D.calCoverage||[];
   function pill(s){
-    if(s==='OK') return '<span class="pill good">OK</span>';
-    if(s==='TO BUILD') return '<span class="pill todo">to build</span>';
-    if(s==='TO SHOOT') return '<span class="pill warn">to shoot</span>';
+    if(s==='ok') return '<span class="pill good">ok</span>';
+    if(s==='to build') return '<span class="pill todo">to build</span>';
+    if(s==='to shoot') return '<span class="pill warn">to shoot</span>';
     return s||'';
   }
-  const worst = k => cov.filter(r=>r[k]==='TO SHOOT').length;
-  const build = k => cov.filter(r=>r[k]==='TO BUILD').length;
-  const ok    = k => cov.filter(r=>r[k]==='OK').length;
+  const worst = k => cov.filter(r=>r[k]==='to shoot').length;
+  const build = k => cov.filter(r=>r[k]==='to build').length;
+  const ok    = k => cov.filter(r=>r[k]==='ok').length;
   document.getElementById("calCovSummary").innerHTML =
     `${cov.length} light combos &middot; darks: `+
     (worst('dark_status')?`<span class="pill warn">${worst('dark_status')} to shoot</span> `:"")+
@@ -789,8 +798,8 @@ function sortableTable(tblEl, cols, data, opts){
     (ok('bias_status')?`<span class="pill good">${ok('bias_status')} OK</span>`:"");
   const fbox = document.getElementById("covfilter");
   const draw = sortableTable(document.getElementById("covTable"),
-    [["camera","Camera"],["gain","Gain","num"],["exp","Exp s","num"],
-     ["subs","Light subs","num"],["hours","Hrs","num"],
+    [["camera","Camera"],["gain","Gain","num"],["exp","Exp s","num",r=>fmtExp(r.exp)],
+     ["subs","Light subs","num"],["hours","Hrs","num",r=>fmtH(r.hours)],
      ["temp_min","Temp min","num"],["temp_max","Temp max","num"],
      ["subs_dark_none","Subs w/o dark","num"],
      ["dark_status","Dark",null,r=>pill(r.dark_status)],
@@ -817,7 +826,7 @@ function sortableTable(tblEl, cols, data, opts){
 // ---- sessions table (filter + sort) ----
 (function(){
   const cols = [
-    ["session_date","Date"],["target_id","Target"],["common_name","Name"],
+    ["session_date","Date"],["target_id","Target ID"],["common_name","Name"],
     ["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],
     ["rejected","Rej.","num"],["hours","Hrs","num"],
     ["stage","Stage"],["method","Method"],["library","Lib"],
@@ -840,7 +849,7 @@ function sortableTable(tblEl, cols, data, opts){
         (sortKey===c[0]?(sortDir>0?" ▲":" ▼"):"")+"</th>").join("")+
       "</tr></thead><tbody>"+
       rows.map(r=>"<tr>"+cols.map(c=>
-        `<td class="${c[2]==='num'?'num':''}">${r[c[0]]??''}</td>`).join("")+
+        `<td class="${c[2]==='num'?'num':''}">${c[0]==="hours"?fmtHM(r.hours):(r[c[0]]??'')}</td>`).join("")+
         "</tr>").join("")+"</tbody>";
     tbl.querySelectorAll("th").forEach(th=>th.onclick=()=>{
       const k=th.dataset.k;
