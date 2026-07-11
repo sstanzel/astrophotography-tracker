@@ -514,6 +514,26 @@ def has_master_file(path):
     return False
 
 
+def detect_set_gain(path):
+    """Most common gain/ISO token in the names under a calibration set folder.
+
+    Bias is gain/ISO-dependent but bias sets aren't gain-foldered: ASIAir frame
+    names carry `gain###` and ASIAir DSLR subfolders carry `ISO###`, so read it
+    from there. ISO lands in the same column lights use for it (frames.gain),
+    keeping coverage matching apples-to-apples. None when no token is found
+    (such a set matches any gain, like a dark set with no temp folder).
+    """
+    counts = {}
+    for _r, dirs, files in os.walk(path):
+        for name in dirs + files:
+            for tok in re.split(r"[_\s]+", name):
+                m = re.match(r"^[Gg]ain(-?\d+)$", tok) or re.match(r"^ISO(\d+)$", tok)
+                if m:
+                    v = int(m.group(1))
+                    counts[v] = counts.get(v, 0) + 1
+    return max(counts, key=counts.get) if counts else None
+
+
 def count_raw_images(session_path):
     """Count non-FITS raw camera files under a session (DSLR sessions)."""
     n = 0
@@ -759,11 +779,24 @@ def apply_migrations(con):
             CASE WHEN raw_frames < min_frames THEN 1 ELSE 0 END AS below_threshold
         FROM resolved;
 
+        -- Coverage recipe settings (calibration_thresholds.toml [coverage]);
+        -- populated there each ingest, seeded here so the view always resolves.
+        CREATE TABLE IF NOT EXISTS coverage_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            require_bias INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT OR IGNORE INTO coverage_settings(id, require_bias) VALUES (1, 1);
+
         -- Light↔calibration coverage (full rationale in schema.sql): per
         -- (camera, gain, exposure) combo the kept lights use, is there
         -- matching dark data (±5 °C set temperature; a set with no
-        -- temperature folder matches any) and bias data (per camera)?
-        -- ok = mastered, to build = raws only, to shoot = missing.
+        -- temperature folder matches any) and bias data (per camera + gain;
+        -- a set with no readable gain/ISO token matches any)? Statuses:
+        -- to shoot = some subs have no matching data · to build = raws only ·
+        -- stale (…) = mastered but superseded or aged (per
+        -- v_calibration_needs) · ok = a fresh master covers every sub ·
+        -- n/a = bias isn't in the calibration recipe (require_bias = 0).
+        -- dark_low / bias_low flag matched raw sets under min_frames.
         DROP VIEW IF EXISTS v_light_calibration_coverage;
         CREATE VIEW v_light_calibration_coverage AS
         WITH lf AS (
@@ -785,11 +818,39 @@ def apply_migrations(con):
                   OR ABS(cm.temperature_c - lf.temp_c) <= 5.0)
             GROUP BY lf.frame_id
         ),
+        dark_needs AS (
+            SELECT lf.frame_id,
+                   MAX(CASE WHEN n.status = 'stale (new raw)' THEN 1 ELSE 0 END) AS dk_stale_raw,
+                   MAX(CASE WHEN n.status = 'stale (age)' THEN 1 ELSE 0 END)     AS dk_stale_age,
+                   MAX(COALESCE(n.below_threshold, 0))                           AS dk_low
+            FROM lf
+            LEFT JOIN v_calibration_needs n
+              ON n.class = 'dark' AND n.camera = lf.camera
+             AND n.gain = lf.gain AND n.exp_s = lf.exp_s
+             AND (n.temperature_c IS NULL OR lf.temp_c IS NULL
+                  OR ABS(n.temperature_c - lf.temp_c) <= 5.0)
+            GROUP BY lf.frame_id
+        ),
         bias_match AS (
-            SELECT camera, MAX(is_generated_master) AS bi_master
-            FROM calibration_masters
-            WHERE class = 'bias'
-            GROUP BY camera
+            SELECT lf.frame_id,
+                   MAX(CASE WHEN cm.is_generated_master THEN 1 ELSE 0 END) AS bi_master,
+                   MAX(CASE WHEN cm.master_id IS NOT NULL THEN 1 ELSE 0 END) AS bi_any
+            FROM lf
+            LEFT JOIN calibration_masters cm
+              ON cm.class = 'bias' AND cm.camera = lf.camera
+             AND (cm.gain IS NULL OR cm.gain = lf.gain)
+            GROUP BY lf.frame_id
+        ),
+        bias_needs AS (
+            SELECT lf.frame_id,
+                   MAX(CASE WHEN n.status = 'stale (new raw)' THEN 1 ELSE 0 END) AS bi_stale_raw,
+                   MAX(CASE WHEN n.status = 'stale (age)' THEN 1 ELSE 0 END)     AS bi_stale_age,
+                   MAX(COALESCE(n.below_threshold, 0))                           AS bi_low
+            FROM lf
+            LEFT JOIN v_calibration_needs n
+              ON n.class = 'bias' AND n.camera = lf.camera
+             AND (n.gain IS NULL OR n.gain = lf.gain)
+            GROUP BY lf.frame_id
         )
         SELECT
             lf.camera, lf.gain, lf.exp_s,
@@ -804,16 +865,27 @@ def apply_migrations(con):
               WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'to shoot'
               WHEN SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) > 0
                 THEN 'to build'
+              WHEN MAX(dn.dk_stale_raw) = 1 THEN 'stale (new raw)'
+              WHEN MAX(dn.dk_stale_age) = 1 THEN 'stale (age)'
               ELSE 'ok'
             END AS dark_status,
+            MAX(dn.dk_low) AS dark_low,
             CASE
-              WHEN bm.camera IS NULL THEN 'to shoot'
-              WHEN bm.bi_master = 0  THEN 'to build'
+              WHEN (SELECT require_bias FROM coverage_settings WHERE id = 1) = 0 THEN 'n/a'
+              WHEN SUM(CASE WHEN NOT bm.bi_any THEN 1 ELSE 0 END) > 0 THEN 'to shoot'
+              WHEN SUM(CASE WHEN bm.bi_any AND NOT bm.bi_master THEN 1 ELSE 0 END) > 0
+                THEN 'to build'
+              WHEN MAX(bn.bi_stale_raw) = 1 THEN 'stale (new raw)'
+              WHEN MAX(bn.bi_stale_age) = 1 THEN 'stale (age)'
               ELSE 'ok'
-            END AS bias_status
+            END AS bias_status,
+            CASE WHEN (SELECT require_bias FROM coverage_settings WHERE id = 1) = 0
+                 THEN 0 ELSE MAX(bn.bi_low) END AS bias_low
         FROM lf
         JOIN dark_match dm USING (frame_id)
-        LEFT JOIN bias_match bm ON bm.camera = lf.camera
+        JOIN dark_needs dn USING (frame_id)
+        JOIN bias_match bm USING (frame_id)
+        JOIN bias_needs bn USING (frame_id)
         GROUP BY lf.camera, lf.gain, lf.exp_s;
     """)
     con.commit()
@@ -954,39 +1026,64 @@ def populate_calibration_thresholds(con, org_root, log):
     sets. Replaces the table each run (the file is the source of truth);
     a missing file leaves the schema-seeded defaults in place.
 
+    The same file's optional [coverage] section declares the calibration
+    recipe: require_bias = false means bias isn't part of the workflow
+    (matched darks + dark-flats), so coverage shows bias as n/a and the
+    build-masters queue skips bias sets. Default: true.
+
     Args:
         con: open DB connection.
         org_root: the _organization folder path.
         log: logging callable.
     """
+    cur = con.cursor()
+    # settings table must exist (with defaults) even when the file is absent
+    cur.execute("""CREATE TABLE IF NOT EXISTS coverage_settings (
+                       id INTEGER PRIMARY KEY CHECK (id = 1),
+                       require_bias INTEGER NOT NULL DEFAULT 1)""")
+    cur.execute("INSERT OR IGNORE INTO coverage_settings(id, require_bias) VALUES (1, 1)")
     path = os.path.join(org_root, "calibration_thresholds.toml")
     if not os.path.isfile(path):
+        con.commit()
         return
-    rows, block = [], None
+    rows, block, coverage, in_coverage = [], None, {}, False
     with open(path, encoding="utf-8") as fh:
         for raw in fh:
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
             if line == "[[threshold]]":
-                block = {}
+                block, in_coverage = {}, False
                 rows.append(block)
                 continue
-            if line.startswith("["):
-                block = None
+            if line == "[coverage]":
+                block, in_coverage = None, True
                 continue
+            if line.startswith("["):
+                block, in_coverage = None, False
+                continue
+            mb = re.match(r'(\w+)\s*=\s*(true|false)\b', line)
             ms = re.match(r'(\w+)\s*=\s*"(.*?)"', line)
             mn = re.match(r'(\w+)\s*=\s*(-?[\d.]+)', line)
+            if in_coverage:
+                if mb:
+                    coverage[mb.group(1)] = (mb.group(2) == "true")
+                continue
             if ms and block is not None:
                 block[ms.group(1)] = ms.group(2)
             elif mn and block is not None:
                 block[mn.group(1)] = float(mn.group(2))
+    if "require_bias" in coverage:
+        cur.execute("UPDATE coverage_settings SET require_bias=? WHERE id=1",
+                    (1 if coverage["require_bias"] else 0,))
+        log(f"  coverage recipe: require_bias="
+            f"{'true' if coverage['require_bias'] else 'false'}")
     valid = [t for t in rows
              if t.get("class") in ("bias", "dark", "flat") and "min_frames" in t]
     if not valid:
         log("  calibration thresholds: file present but no valid blocks — kept existing")
+        con.commit()
         return
-    cur = con.cursor()
     cur.execute("DELETE FROM calibration_thresholds")
     for t in valid:
         cur.execute("""INSERT INTO calibration_thresholds
@@ -1280,7 +1377,8 @@ def ingest_calibration(con, library_id, root, obs, log):
                 is_master = 1 if has_master_file(sp) else 0
                 rel = os.path.relpath(sp, root)
                 upsert({"library_id": library_id, "class": "bias", "folder_path": rel,
-                        "camera": cam, "scope": None, "temperature_c": None, "gain": None,
+                        "camera": cam, "scope": None, "temperature_c": None,
+                        "gain": detect_set_gain(sp),
                         "exp_s": None, "capture_date": date_of(sub),
                         "frame_count": fc, "total_size_bytes": sz,
                         "is_generated_master": is_master})

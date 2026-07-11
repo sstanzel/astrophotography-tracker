@@ -65,18 +65,21 @@ QUERIES = {
         GROUP BY t.target_id
         HAVING (g.goal_hours IS NOT NULL AND hours < g.goal_hours) OR COUNT(s.session_id)=0
         ORDER BY g.priority, gap DESC"""),
-    "masters": ("Calibration sets to turn into masters (bias/dark, no master)", """
+    "masters": ("Calibration sets to turn into masters (bias/dark, no master; "
+                "bias skipped when the recipe doesn't require it)", """
         SELECT class, camera, temperature_c AS temperature, gain,
                exp_s AS exposure, frame_count AS frames
         FROM calibration_masters
-        WHERE class IN ('bias','dark') AND is_generated_master=0
+        WHERE is_generated_master=0
+          AND (class='dark' OR (class='bias' AND (SELECT require_bias
+               FROM coverage_settings WHERE id=1)=1))
         ORDER BY class, camera, temperature_c, gain, exp_s"""),
-    "coverage": ("Light combos missing dark/bias coverage (shoot or build)", """
+    "coverage": ("Light combos needing calibration attention (shoot, build, or stale)", """
         SELECT camera, gain, exp_s AS exposure, light_subs AS subs, hours,
                subs_dark_none AS "missing dark", dark_status AS dark,
                bias_status AS bias
         FROM v_light_calibration_coverage
-        WHERE dark_status != 'ok' OR bias_status != 'ok'
+        WHERE dark_status NOT IN ('ok','n/a') OR bias_status NOT IN ('ok','n/a')
         ORDER BY camera, gain, exp_s"""),
 }
 

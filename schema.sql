@@ -626,17 +626,32 @@ SELECT
     CASE WHEN raw_frames < min_frames THEN 1 ELSE 0 END AS below_threshold
 FROM resolved;
 
+-- Coverage recipe settings, populated each ingest from
+-- calibration_thresholds.toml's [coverage] section. require_bias = 0 declares
+-- a bias-free calibration recipe (matched darks + dark-flats): coverage shows
+-- bias as n/a and the build-masters queue skips bias sets.
+CREATE TABLE coverage_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    require_bias INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO coverage_settings(id, require_bias) VALUES (1, 1);
+
 -- Light↔calibration coverage: for every (camera, gain, exposure) combo the
 -- kept light frames actually use, does the _Calibration Library hold matching
 -- DARK data (same camera/gain/exposure, set temperature within ±5 °C of the
 -- light's sensor temperature — the widely used dark-matching tolerance; a set
 -- with no temperature folder, e.g. an uncooled DSLR, matches any) and BIAS
--- data (per camera — bias sets aren't gain-foldered)? The camera key is the
--- session's sensor: the registry name, which also names the calibration
--- camera folders. Statuses: OK (a generated master covers every sub) /
--- TO BUILD (raws cover it, master not yet built) / TO SHOOT (some subs have
--- no matching calibration data at all). Flats are per-session by design and
--- deliberately absent here.
+-- data (per camera + gain; bias sets aren't gain-foldered, so ingest reads the
+-- gain/ISO token from the frame/subfolder names — a set with no readable token
+-- matches any gain)? The camera key is the session's sensor: the registry
+-- name, which also names the calibration camera folders. Statuses:
+-- to shoot (some subs have no matching calibration data at all) /
+-- to build (raws cover it, master not yet built) /
+-- stale (new raw|age) (mastered, but superseded or aged per
+-- v_calibration_needs) / ok (a fresh master covers every sub) /
+-- n/a (bias only: not part of the calibration recipe, require_bias = 0).
+-- dark_low / bias_low flag matched raw sets below their min_frames threshold.
+-- Flats are per-session by design and deliberately absent here.
 CREATE VIEW v_light_calibration_coverage AS
 WITH lf AS (
     SELECT f.frame_id, s.sensor AS camera, f.gain, f.exp_s, f.temp_c
@@ -657,11 +672,39 @@ dark_match AS (
           OR ABS(cm.temperature_c - lf.temp_c) <= 5.0)
     GROUP BY lf.frame_id
 ),
+dark_needs AS (
+    SELECT lf.frame_id,
+           MAX(CASE WHEN n.status = 'stale (new raw)' THEN 1 ELSE 0 END) AS dk_stale_raw,
+           MAX(CASE WHEN n.status = 'stale (age)' THEN 1 ELSE 0 END)     AS dk_stale_age,
+           MAX(COALESCE(n.below_threshold, 0))                           AS dk_low
+    FROM lf
+    LEFT JOIN v_calibration_needs n
+      ON n.class = 'dark' AND n.camera = lf.camera
+     AND n.gain = lf.gain AND n.exp_s = lf.exp_s
+     AND (n.temperature_c IS NULL OR lf.temp_c IS NULL
+          OR ABS(n.temperature_c - lf.temp_c) <= 5.0)
+    GROUP BY lf.frame_id
+),
 bias_match AS (
-    SELECT camera, MAX(is_generated_master) AS bi_master
-    FROM calibration_masters
-    WHERE class = 'bias'
-    GROUP BY camera
+    SELECT lf.frame_id,
+           MAX(CASE WHEN cm.is_generated_master THEN 1 ELSE 0 END) AS bi_master,
+           MAX(CASE WHEN cm.master_id IS NOT NULL THEN 1 ELSE 0 END) AS bi_any
+    FROM lf
+    LEFT JOIN calibration_masters cm
+      ON cm.class = 'bias' AND cm.camera = lf.camera
+     AND (cm.gain IS NULL OR cm.gain = lf.gain)
+    GROUP BY lf.frame_id
+),
+bias_needs AS (
+    SELECT lf.frame_id,
+           MAX(CASE WHEN n.status = 'stale (new raw)' THEN 1 ELSE 0 END) AS bi_stale_raw,
+           MAX(CASE WHEN n.status = 'stale (age)' THEN 1 ELSE 0 END)     AS bi_stale_age,
+           MAX(COALESCE(n.below_threshold, 0))                           AS bi_low
+    FROM lf
+    LEFT JOIN v_calibration_needs n
+      ON n.class = 'bias' AND n.camera = lf.camera
+     AND (n.gain IS NULL OR n.gain = lf.gain)
+    GROUP BY lf.frame_id
 )
 SELECT
     lf.camera, lf.gain, lf.exp_s,
@@ -676,16 +719,27 @@ SELECT
       WHEN SUM(CASE WHEN NOT dm.dk_any THEN 1 ELSE 0 END) > 0 THEN 'to shoot'
       WHEN SUM(CASE WHEN dm.dk_any AND NOT dm.dk_master THEN 1 ELSE 0 END) > 0
         THEN 'to build'
+      WHEN MAX(dn.dk_stale_raw) = 1 THEN 'stale (new raw)'
+      WHEN MAX(dn.dk_stale_age) = 1 THEN 'stale (age)'
       ELSE 'ok'
     END AS dark_status,
+    MAX(dn.dk_low) AS dark_low,
     CASE
-      WHEN bm.camera IS NULL THEN 'to shoot'
-      WHEN bm.bi_master = 0  THEN 'to build'
+      WHEN (SELECT require_bias FROM coverage_settings WHERE id = 1) = 0 THEN 'n/a'
+      WHEN SUM(CASE WHEN NOT bm.bi_any THEN 1 ELSE 0 END) > 0 THEN 'to shoot'
+      WHEN SUM(CASE WHEN bm.bi_any AND NOT bm.bi_master THEN 1 ELSE 0 END) > 0
+        THEN 'to build'
+      WHEN MAX(bn.bi_stale_raw) = 1 THEN 'stale (new raw)'
+      WHEN MAX(bn.bi_stale_age) = 1 THEN 'stale (age)'
       ELSE 'ok'
-    END AS bias_status
+    END AS bias_status,
+    CASE WHEN (SELECT require_bias FROM coverage_settings WHERE id = 1) = 0
+         THEN 0 ELSE MAX(bn.bi_low) END AS bias_low
 FROM lf
 JOIN dark_match dm USING (frame_id)
-LEFT JOIN bias_match bm ON bm.camera = lf.camera
+JOIN dark_needs dn USING (frame_id)
+JOIN bias_match bm USING (frame_id)
+JOIN bias_needs bn USING (frame_id)
 GROUP BY lf.camera, lf.gain, lf.exp_s;
 
 -- Target acquisition progress: lifetime hours against the goal, with percent

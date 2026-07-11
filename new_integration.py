@@ -18,6 +18,12 @@ Dry run by default — it previews the sessions the rule matches today; pass
 
 Then build the integration in PixInsight / PI Magic Studio inside that folder,
 run mark_integrated.py to record what you stacked, and re-run ingest.py.
+
+For a retroactive scaffold — the master already exists and contains exactly the
+sessions the rule matches today — add --built to also record them in [built],
+skipping the separate mark_integrated.py step. Never use --built before stacking:
+[built] means "physically in the current master", and prefilling it silences the
+Restack signal the empty list exists to raise.
 """
 import argparse
 import os
@@ -80,13 +86,16 @@ def select_members(target_path, span, rig):
     return members, rigs
 
 
-def build_manifest(rig, span, goal_hours):
+def build_manifest(rig, span, goal_hours, built_sessions=None):
     """Render a rule-based integration.toml for a living integration.
 
     Args:
         rig: '<scope> <sensor>' or '' for a composite.
         span: the span string.
         goal_hours: optional integration-hours goal, or None.
+        built_sessions: sessions already stacked into an existing master
+            (retroactive scaffold via --built), or None for the normal
+            empty [built].
 
     Returns:
         The manifest file contents.
@@ -113,6 +122,9 @@ def build_manifest(rig, span, goal_hours):
         "# Sessions actually stacked into the current master. Fill this with",
         "# mark_integrated.py after each stack (or by hand).",
         "sessions = [",
+    ]
+    lines += [f'  "{s}",' for s in (built_sessions or [])]
+    lines += [
         "]",
         "",
         "[pipeline]",
@@ -141,6 +153,10 @@ def main():
                          "omit for a composite across rigs")
     ap.add_argument("--goal", type=float, default=None,
                     help="integration-hours goal for the dashboard (e.g. 50)")
+    ap.add_argument("--built", action="store_true",
+                    help="retroactive scaffold: a master containing exactly today's "
+                         "matches already exists — also record them in [built] "
+                         "(instead of running mark_integrated.py after)")
     ap.add_argument("--apply", action="store_true",
                     help="actually create the folder (default: preview only)")
     ap.add_argument("--config", default=None,
@@ -168,6 +184,9 @@ def main():
     print(f"Integration : {folder}   ({kind}, {len(rigs)} rig(s))")
     print(f"Rule        : mode=auto, rig={args.rig or '(any)'}, span={args.span}"
           + (f", goal={args.goal:g}h" if args.goal is not None else ""))
+    if args.built:
+        print("Built       : retroactive — today's matches will be recorded as "
+              "already stacked")
     print(f"Matches today ({len(members)} sessions):")
     for ms in members:
         print(f"  {ms}")
@@ -185,12 +204,17 @@ def main():
     os.makedirs(os.path.join(dest, "PI Magic"))
     os.makedirs(os.path.join(dest, f"{folder} Results"))
     with open(os.path.join(dest, "integration.toml"), "w", encoding="utf-8") as fh:
-        fh.write(build_manifest(args.rig, args.span, args.goal))
+        fh.write(build_manifest(args.rig, args.span, args.goal,
+                                members if args.built else None))
 
     print(f"\nCreated: {dest}")
-    print("Next: build it in PixInsight in that folder, then run\n"
-          f'  python3 mark_integrated.py "{dest}"\n'
-          "and re-run ingest.py.")
+    if args.built:
+        print(f"Recorded {len(members)} session(s) in [built]. "
+              "Re-run ingest.py to update the tracker.")
+    else:
+        print("Next: build it in PixInsight in that folder, then run\n"
+              f'  python3 mark_integrated.py "{dest}"\n'
+              "and re-run ingest.py.")
 
 
 if __name__ == "__main__":

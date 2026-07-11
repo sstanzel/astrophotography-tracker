@@ -52,7 +52,10 @@ def main():
             "targetsImaged": scalar("SELECT COUNT(DISTINCT target_id) FROM sessions WHERE lights_kept>0 AND NOT is_other_capture"),
             "keptLights": scalar("SELECT COUNT(*) FROM frames WHERE frame_type='light' AND NOT is_rejected"),
             "calSets": scalar("SELECT COUNT(*) FROM calibration_masters"),
-            "calNeeds": scalar("SELECT COUNT(*) FROM v_calibration_needs WHERE status IN ('no master','stale (new raw)','stale (age)')"),
+            "calNeeds": scalar("""SELECT COUNT(*) FROM v_calibration_needs
+                                  WHERE status IN ('no master','stale (new raw)','stale (age)')
+                                    AND (class='dark' OR (class='bias' AND (SELECT require_bias
+                                         FROM coverage_settings WHERE id=1)=1))"""),
             "integrations": (scalar("SELECT COUNT(*) FROM integrations")
                              if has_integrations else 0),
             "unpublishedTargets": (scalar("SELECT COUNT(*) FROM v_targets_unpublished")
@@ -101,17 +104,11 @@ def main():
                             JOIN targets t USING(target_id)
                             LEFT JOIN v_target_lifetime v USING(target_id)
                             ORDER BY g.priority, name"""),
-        "calibration": rows("""SELECT class, COALESCE(camera,scope,'') AS rig,
-                                      temperature_c AS temp, gain, exp_s AS exp,
-                                      raw_sets, raw_frames, COALESCE(master_date,'') AS master_date,
-                                      status, below_threshold
-                               FROM v_calibration_needs
-                               ORDER BY class, rig, temperature_c, gain"""),
         "calCoverage": rows("""SELECT camera, gain, exp_s AS exp,
                                       light_subs AS subs, hours,
                                       temp_min, temp_max,
                                       subs_dark_master, subs_dark_raw, subs_dark_none,
-                                      dark_status, bias_status
+                                      dark_status, dark_low, bias_status, bias_low
                                FROM v_light_calibration_coverage
                                ORDER BY camera, gain, exp_s"""),
         "qc": rows("""SELECT target_id, session_date, captured_at_utc, hfr, rms_arcsec
@@ -256,12 +253,15 @@ def main():
         "masters": rows("""SELECT class, camera, temperature_c AS temp, gain,
                                   exp_s AS exp, frame_count AS frames
                            FROM calibration_masters
-                           WHERE class IN ('bias','dark') AND is_generated_master=0
+                           WHERE is_generated_master=0
+                             AND (class='dark' OR (class='bias' AND (SELECT require_bias
+                                  FROM coverage_settings WHERE id=1)=1))
                            ORDER BY class, camera, temperature_c, gain, exp_s"""),
         "coverage": rows("""SELECT camera, gain, exp_s AS exp, light_subs AS subs,
                                    hours, dark_status, bias_status
                             FROM v_light_calibration_coverage
-                            WHERE dark_status != 'ok' OR bias_status != 'ok'
+                            WHERE dark_status NOT IN ('ok','n/a')
+                               OR bias_status NOT IN ('ok','n/a')
                             ORDER BY camera, gain, exp_s"""),
     }
 
@@ -425,19 +425,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="scroll"><table id="todoTable"></table></div>
 </div>
 
-<div class="panel"><h2>Calibration status</h2>
-  <div id="calSummary" class="sub" style="margin-bottom:8px"></div>
-  <div id="calFindings"></div>
-  <div style="margin-bottom:10px"><input type="search" id="calfilter" placeholder="filter by class, rig, status..."></div>
-  <div class="scroll"><table id="calTable"></table></div>
-</div>
-
 <div class="panel"><h2>Light &harr; calibration coverage</h2>
   <div id="calCovSummary" class="sub" style="margin-bottom:8px"></div>
+  <div id="calFindings"></div>
   <div class="sub" style="margin-bottom:8px">Every camera / gain / exposure combo your kept lights use, matched against the
   library's darks (same camera+gain+exposure, set temperature within &plusmn;5&nbsp;&deg;C; untracked-temperature sets match any)
-  and bias (per camera). <b>ok</b> = a built master covers every sub &middot; <b>to build</b> = raws on hand, master not built
-  &middot; <b>to shoot</b> = some subs have no matching calibration data. Flats are per-session by design and not matched here.</div>
+  and bias (same camera+gain; sets with no readable gain/ISO match any). <b>ok</b> = a fresh master covers every sub &middot;
+  <b>to build</b> = raws on hand, master not built &middot; <b>to shoot</b> = some subs have no matching calibration data &middot;
+  <b>stale</b> = mastered, but newer raws exist or the master aged past its refresh window &middot; <b>n/a</b> = bias isn't part
+  of the calibration recipe (<code>calibration_thresholds.toml</code> <code>[coverage] require_bias</code>) &middot;
+  <i>low frames</i> = the matched raw set is under its min-frames threshold. Flats are per-session by design and not matched here.</div>
   <div style="margin-bottom:10px"><input type="search" id="covfilter" placeholder="filter by camera, status..."></div>
   <div class="scroll"><table id="covTable"></table></div>
 </div>
@@ -743,25 +740,36 @@ function sortableTable(tblEl, cols, data, opts){
     }).join("") + "</tbody></table>";
 })();
 
-// ---- calibration ----
+// ---- light <-> calibration coverage (absorbed the Calibration status panel:
+// staleness, low-frames, and the CAL_* findings all surface here) ----
 (function(){
+  const cov = D.calCoverage||[];
   function pill(s){
     if(s==='ok') return '<span class="pill good">ok</span>';
-    if(s==='no master') return '<span class="pill todo">to build</span>';
+    if(s==='to build') return '<span class="pill todo">to build</span>';
+    if(s==='to shoot') return '<span class="pill warn">to shoot</span>';
     if(s && s.startsWith('stale')) return `<span class="pill warn">${s}</span>`;
-    if(s && s.startsWith('n/a')) return '<span class="pill na">n/a</span>';
+    if(s==='n/a') return '<span class="pill na">n/a</span>';
     return s||'';
   }
-  // coverage summary
-  const cal = D.calibration||[];
-  const c = s => cal.filter(r=>r.status===s || (s==='stale'&&(r.status||'').startsWith('stale'))).length;
-  const toBuild=c('no master'), stale=c('stale'), ok=c('ok'), na=c('n/a (per-session)');
-  document.getElementById("calSummary").innerHTML =
-    `<span class="pill todo">${toBuild} to build</span> `+
-    (stale?`<span class="pill warn">${stale} stale</span> `:"")+
-    (ok?`<span class="pill good">${ok} covered</span> `:"")+
-    `<span class="pill na">${na} per-session flats</span> `+
-    `&nbsp; (Bias/Dark configs across your library; drop a master*.xisf in a set's folder to clear it.)`;
+  const statusCell = (s,low) => pill(s)+(low?' <span class="sub">low frames</span>':'');
+  const n = (k,f) => cov.filter(f).length;
+  function statusSummary(k){
+    const shoot = n(k, r=>r[k]==='to shoot'),
+          build = n(k, r=>r[k]==='to build'),
+          stale = n(k, r=>(r[k]||'').startsWith('stale')),
+          ok    = n(k, r=>r[k]==='ok'),
+          na    = n(k, r=>r[k]==='n/a');
+    if(na===cov.length && cov.length)
+      return '<span class="pill na">n/a — not in the calibration recipe</span>';
+    return (shoot?`<span class="pill warn">${shoot} to shoot</span> `:"")+
+           (build?`<span class="pill todo">${build} to build</span> `:"")+
+           (stale?`<span class="pill warn">${stale} stale</span> `:"")+
+           (ok?`<span class="pill good">${ok} ok</span>`:"");
+  }
+  document.getElementById("calCovSummary").innerHTML =
+    `${cov.length} light combos &middot; darks: `+statusSummary('dark_status')+
+    ` &middot; bias: `+statusSummary('bias_status');
   // registry / structural findings (CAL_* — kept out of Data Health)
   const cf = D.calFindings||[];
   if(cf.length){
@@ -771,45 +779,14 @@ function sortableTable(tblEl, cols, data, opts){
       cf.map(r=>`<span class="pill ${sevClass(r.severity)}" style="margin:0 6px 6px 0">`+
         `${r.code}</span> ${r.location} — ${r.message}`).join("<br>")+'</div>';
   }
-  const fbox = document.getElementById("calfilter");
-  const draw = sortableTable(document.getElementById("calTable"),
-    [["class","Class"],["rig","Rig"],["temp","Temperature","num"],["gain","Gain","num"],
-     ["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["raw_sets","Raw sets","num"],["raw_frames","Raw frames","num"],
-     ["master_date","Master"],["status","Status",null,r=>pill(r.status)]],
-    cal, {sortKey:"status",sortDir:1,getFilter:()=>fbox.value});
-  draw("");
-  fbox.oninput = ()=>draw(fbox.value);
-})();
-
-// ---- light <-> calibration coverage ----
-(function(){
-  const cov = D.calCoverage||[];
-  function pill(s){
-    if(s==='ok') return '<span class="pill good">ok</span>';
-    if(s==='to build') return '<span class="pill todo">to build</span>';
-    if(s==='to shoot') return '<span class="pill warn">to shoot</span>';
-    return s||'';
-  }
-  const worst = k => cov.filter(r=>r[k]==='to shoot').length;
-  const build = k => cov.filter(r=>r[k]==='to build').length;
-  const ok    = k => cov.filter(r=>r[k]==='ok').length;
-  document.getElementById("calCovSummary").innerHTML =
-    `${cov.length} light combos &middot; darks: `+
-    (worst('dark_status')?`<span class="pill warn">${worst('dark_status')} to shoot</span> `:"")+
-    (build('dark_status')?`<span class="pill todo">${build('dark_status')} to build</span> `:"")+
-    (ok('dark_status')?`<span class="pill good">${ok('dark_status')} OK</span> `:"")+
-    `&middot; bias: `+
-    (worst('bias_status')?`<span class="pill warn">${worst('bias_status')} to shoot</span> `:"")+
-    (build('bias_status')?`<span class="pill todo">${build('bias_status')} to build</span> `:"")+
-    (ok('bias_status')?`<span class="pill good">${ok('bias_status')} OK</span>`:"");
   const fbox = document.getElementById("covfilter");
   const draw = sortableTable(document.getElementById("covTable"),
     [["camera","Camera"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],
      ["subs","Light subs","num"],["hours","Hours","num",r=>fmtH(r.hours)],
      ["temp_min","Temperature min","num"],["temp_max","Temperature max","num"],
      ["subs_dark_none","Subs missing dark","num"],
-     ["dark_status","Dark",null,r=>pill(r.dark_status)],
-     ["bias_status","Bias",null,r=>pill(r.bias_status)]],
+     ["dark_status","Dark",null,r=>statusCell(r.dark_status,r.dark_low)],
+     ["bias_status","Bias",null,r=>statusCell(r.bias_status,r.bias_low)]],
     cov, {sortKey:"camera",sortDir:1,getFilter:()=>fbox.value});
   draw("");
   fbox.oninput = ()=>draw(fbox.value);

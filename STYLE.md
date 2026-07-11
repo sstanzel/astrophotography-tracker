@@ -37,14 +37,15 @@ edit. Two standing exceptions:
 - **Summaries come first**: the KPI cards, then Integration by year,
   Top targets by lifetime hours, and the Published/Printed ledgers sit above
   the detail sections.
-- **Reference/diagnostic panels go last**: Calibration status,
-  Light↔calibration coverage, QC candidates, and Data health close the page.
+- **Reference/diagnostic panels go last**: Light↔calibration coverage (the single
+  calibration surface — it absorbed the Calibration status panel 2026-07-11),
+  QC candidates, and Data health close the page.
 
 ## Emphasis: no shouting
 
 - **ALL CAPS and red are reserved for act-now urgency** (data-loss risk,
   validation *errors*). Routine statuses and to-dos are lowercase:
-  `ok`, `to build`, `to shoot`, `no master`, `stale (new raw)`.
+  `ok`, `to build`, `to shoot`, `no master`, `stale (new raw)`, `n/a`.
 - Pill/fill colors: green for fine, soft amber/yellow for work-to-do,
   red **only** for errors. A queue of chores is not an alarm.
 

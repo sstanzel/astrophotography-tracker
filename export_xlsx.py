@@ -268,16 +268,20 @@ def main():
     wl = wb.create_sheet("Light Coverage")
     l_headers = ["Camera", "Gain", "Exposure (s)", "Light Subs", "Hours",
                  "Temperature Min", "Temperature Max", "Subs Dark-Mastered", "Subs Dark-Raw",
-                 "Subs No Dark", "Dark Status", "Bias Status"]
+                 "Subs No Dark", "Dark Status", "Bias Status",
+                 "Dark Low Frames", "Bias Low Frames"]
     l_rows = [[r["camera"], r["gain"], r["exp_s"], r["light_subs"], r["hours"],
                r["temp_min"], r["temp_max"], r["subs_dark_master"],
                r["subs_dark_raw"], r["subs_dark_none"],
-               r["dark_status"], r["bias_status"]]
+               r["dark_status"], r["bias_status"],
+               "Yes" if r["dark_low"] else "", "Yes" if r["bias_low"] else ""]
               for r in cur.execute("""
                   SELECT * FROM v_light_calibration_coverage
                   ORDER BY camera, gain, exp_s""")]
     write_sheet(wl, l_headers, l_rows, col_formats={5: "0"})
-    cov_colors = {"to shoot": "FCE5CD", "to build": "FFF2CC", "ok": "D9EAD3"}
+    cov_colors = {"to shoot": "FCE5CD", "to build": "FFF2CC",
+                  "stale (new raw)": "FFF2CC", "stale (age)": "FFF2CC",
+                  "ok": "D9EAD3", "n/a": "EFEFEF"}
     for r in range(2, len(l_rows) + 2):
         for col in (11, 12):
             st = wl.cell(row=r, column=col).value
