@@ -1,0 +1,26 @@
+# =============================================================================
+# Target integration-hour goals  ·  EXAMPLE
+# =============================================================================
+# Copy to _organization/target_goals.toml (bootstrap.py does this) and add
+# your own goals.
+#
+# A target's goal — how many hours of good (kept) integration you're aiming for
+# over its lifetime — is a PLANNING decision, so it lives here in the registry
+# rather than in a capture folder. The tracker loads this on every ingest and
+# shows progress bars + a goal column in the Targets table. Planned targets with
+# no sessions yet still show up (at the "Planned" stage) with their goal.
+#
+# One [[goal]] block per target. `target` is the target FOLDER name (exactly as
+# in `target folders/`); `hours` is the lifetime integration goal; `priority` is
+# optional (1 = high, 2 = medium, 3 = low). Goals for unknown targets are skipped.
+# =============================================================================
+
+[[goal]]
+target   = "M 81 Bodes Galaxy"
+hours    = 50
+priority = 1
+
+[[goal]]
+target   = "M 51 Whirlpool Galaxy"
+hours    = 20
+priority = 2

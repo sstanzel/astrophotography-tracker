@@ -1355,21 +1355,35 @@ def ingest_calibration(con, library_id, root, obs, log):
         m = DATE_RE.search(name)
         return m.group(1) if m else None
 
-    # --- Bias: _Calibration Library/Bias/{Camera}/{Bias date | Bias Masters} ---
+    # --- Bias: _Calibration Library/Bias/{Camera}/{Gain### | ISO###}/{Date} ---
+    # (2026-07-11 layout; older flat sets directly under the camera folder
+    # still parse, with gain read from frame/subfolder name tokens instead)
     bias_root = os.path.join(cal_root, "Bias")
     if os.path.isdir(bias_root):
+        gain_dir_re = re.compile(r"^(?:[Gg]ain(-?\d+)|ISO(\d+))$")
         for cam in os.listdir(bias_root):
             if cam.startswith(".") or cam.startswith("!"):
                 continue
             cdir = os.path.join(bias_root, cam)
             if not os.path.isdir(cdir):
                 continue
+            sets = []                       # (set_path, set_name, gain_from_path)
             for sub in os.listdir(cdir):
                 if sub.startswith(".") or "example" in sub.lower():
                     continue
                 sp = os.path.join(cdir, sub)
                 if not os.path.isdir(sp):
                     continue
+                gm = gain_dir_re.match(sub)
+                if gm:
+                    gain = int(gm.group(1) or gm.group(2))
+                    sets += [(os.path.join(sp, d), d, gain)
+                             for d in os.listdir(sp)
+                             if not d.startswith(".")
+                             and os.path.isdir(os.path.join(sp, d))]
+                else:
+                    sets.append((sp, sub, None))
+            for sp, sub, gain in sets:
                 fc, sz = count_tree(sp)
                 if fc == 0:
                     obs["cal_empty"].append(os.path.relpath(sp, root))
@@ -1378,7 +1392,7 @@ def ingest_calibration(con, library_id, root, obs, log):
                 rel = os.path.relpath(sp, root)
                 upsert({"library_id": library_id, "class": "bias", "folder_path": rel,
                         "camera": cam, "scope": None, "temperature_c": None,
-                        "gain": detect_set_gain(sp),
+                        "gain": gain if gain is not None else detect_set_gain(sp),
                         "exp_s": None, "capture_date": date_of(sub),
                         "frame_count": fc, "total_size_bytes": sz,
                         "is_generated_master": is_master})

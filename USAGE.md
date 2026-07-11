@@ -13,13 +13,30 @@ volume named in `config.toml` mounted.
 
 ---
 
-## One-time setup (new machine or new library)
+## Fresh start (bare git clone — new user or new machine)
+
+The repo is self-sufficient: everything personal lives *outside* it, and
+`tracker/templates/` holds the blank template for each of those files.
 
 ```bash
-# 1. Point config.toml at your capture libraries — the only per-machine edit:
-#    one [[library]] block each (path, role = "working" | "archive"),
-#    plus the [mirror] folder for the offline dashboard copy.
-# 2. First scan — builds tracker.db, dashboard, xlsx, and mirrors them:
+# 1. Clone so the repo sits at <anywhere>/_organization/tracker/
+#    (the scripts find _organization/ by position, one level up)
+git clone git@github.com:sstanzel/astrophotography-tracker.git _organization/tracker
+cd _organization/tracker
+
+# 2. Stamp out the skeleton — registry directories + one copy of each
+#    example toml (idempotent; existing files are never touched):
+python3 bootstrap.py                  # --dry-run to preview
+
+# 3. Make it yours:
+#    - config.toml            -> your library paths + [mirror] (per-machine, gitignored)
+#    - ../locations.toml      -> your imaging sites (coords, Bortle)
+#    - ../target_goals.toml   -> lifetime hour goals
+#    - ../plans.toml          -> saved ASIAIR/NINA framings
+#    - ../calibration_thresholds.toml -> min frames, refresh windows, [coverage] recipe
+#    - registry dirs          -> one empty directory per camera/scope/filter/target
+
+# 4. First scan — builds tracker.db, dashboard, xlsx, and mirrors them:
 python3 refresh.py
 ```
 
@@ -27,6 +44,11 @@ The registry (`../filter_values/`, `scope_values/`, `sensor_values/`,
 `target folders/`) defines every legal name. Adding a new camera, scope, or target =
 creating an empty directory there. Goals live in `../target_goals.toml`; calibration
 freshness rules in `../calibration_thresholds.toml`.
+
+`tracker/templates/` is also the canonical home of the per-session
+`notes.toml` template (PostHaste stamps it into new session folders) and the
+`integration.toml` manifest template — single copies, git-tracked; the
+populated files they become live out in the libraries.
 
 ## After every capture night
 
@@ -55,6 +77,21 @@ python3 worklist.py all
 ```
 
 Same panels as the dashboard's Work Queue — this is the CLI face.
+
+## Blinking a session (culling)
+
+Pull bad frames into the session's `Rejected/` folder — that alone marks the
+session culled on the next refresh (integrating also does). The one case the
+files can't show is "reviewed, kept every frame, not yet stacked": for that,
+open the session's `notes.toml` and flip the pre-seeded top-level flag:
+
+```toml
+culled        = false        # -> change to true
+```
+
+Nothing ever auto-edits that flag — the tracker only reads it. New sessions
+get the line from `tracker/templates/notes.toml` (stamped in by PostHaste);
+every existing session's notes.toml was backfilled 2026-07-11.
 
 ## Processing a target
 

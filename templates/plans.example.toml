@@ -1,0 +1,34 @@
+# =============================================================================
+# Saved imaging plans  ·  EXAMPLE
+# =============================================================================
+# Copy to _organization/plans.toml (bootstrap.py does this) and paste in your
+# own plan exports.
+#
+# A reusable library of plan exports — the framing (RA, DEC, rotation angle)
+# for a target on a given rig. Reusing the same rotation angle across sessions
+# keeps subframes registering cleanly, which matters for multi-session
+# integration of a target.
+#
+# How to add entries:
+#   ASIAIR — in the app: Plan | Share | Copy, then paste the rows into the
+#            matching [asiair."<rig>"] block below.
+#   NINA   — export the target's framing and record it in a [nina."<rig>"]
+#            block the same way.
+#
+# Rig labels are whatever the planning app shows — not the capture-library
+# scope/sensor vocabulary.
+#
+# Each target row: name, ra, dec, angle (rotation in degrees).
+# =============================================================================
+
+# ----- ASIAIR plans ----------------------------------------------------------
+
+[asiair."Example Rig"]
+saved = "2026-01-01"
+targets = [
+  { name = "M 42", ra = "05h 35m 17s", dec = "-05° 23′ 29″", angle = 267.1 },
+  { name = "M 81", ra = "09h 55m 38s", dec = "+69° 04′ 04″", angle = 157.3 },
+]
+
+# ----- NINA plans ------------------------------------------------------------
+# Add NINA target framing here as it is exported, same shape as above.

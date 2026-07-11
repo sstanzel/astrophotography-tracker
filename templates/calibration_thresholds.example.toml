@@ -1,0 +1,47 @@
+# =============================================================================
+# Calibration thresholds — what counts as "enough" calibration data  ·  EXAMPLE
+# =============================================================================
+# Copy to _organization/calibration_thresholds.toml (bootstrap.py does this)
+# and tune to your workflow.
+#
+# Loaded into tracker.db on every ingest (this file is the source of truth;
+# the table is replaced each run). Drives two classifications in
+# v_calibration_needs and the dashboard's coverage panel:
+#   below threshold — a set has fewer raw frames than min_frames
+#   stale (age)     — a master is older than refresh_days
+#
+# Each [[threshold]] block:
+#   class        = "bias" | "dark" | "flat"       (required)
+#   min_frames   = <int>                          (required)
+#   refresh_days = <int>       omit for "never goes stale by age"
+#   notes        = "<why>"
+# Optional specificity — a more specific block overrides the class default
+# for matching sets (most specific match wins):
+#   camera        = "<sensor_values name>"
+#   temperature_c = <float>
+#   gain          = <int>
+#   exp_s         = <float>
+
+# The calibration recipe. require_bias = true demands a bias master per
+# camera + gain. Set false if you calibrate with matched-exposure darks and
+# flats with dark-flats (no bias in the workflow) — coverage then shows bias
+# as n/a and the build-masters queue skips bias sets.
+[coverage]
+require_bias = true
+
+[[threshold]]
+class        = "bias"
+min_frames   = 50
+refresh_days = 365
+notes        = "Default: 50 bias frames; refresh yearly"
+
+[[threshold]]
+class        = "dark"
+min_frames   = 25
+refresh_days = 180
+notes        = "Default: 25 darks per temp/gain/exposure; refresh twice a year"
+
+[[threshold]]
+class        = "flat"
+min_frames   = 20
+notes        = "Default: 20 flats per rig per night; flats are per-session, no refresh"

@@ -1,0 +1,36 @@
+# =============================================================================
+# Imaging locations  ·  EXAMPLE
+# =============================================================================
+# Copy to _organization/locations.toml (bootstrap.py does this) and add your
+# own sites.
+#
+# Each session's notes.toml carries a `location` key that points to one of the
+# blocks below. Attributes that belong to a place — coordinates and Bortle sky
+# rating — live here once, instead of being re-typed into every session.
+#
+# The tracker resolves a session's `location` against this table to get the
+# coordinates (for moon and weather lookups) and the Bortle rating.
+#
+# To add a site: copy a block, rename the [heading], fill in the values.
+# The heading is the name used in notes.toml (e.g. location = "Home").
+#
+# Coordinate notes: street-address sites are fine at an approximate point —
+# accurate to within a city block is plenty for moon and weather lookups.
+# Bortle values are estimates from light-pollution references (e.g.
+# lightpollutionmap.app); treat them as starting points and adjust from your
+# own sky-quality observations.
+# =============================================================================
+
+["Home"]
+latitude    = 40.0150
+longitude   = -105.2705
+elevation_m = 1624
+bortle      = 5
+notes       = "Primary imaging site — replace with your own coordinates"
+
+["Dark Site"]
+latitude    = 36.7791
+longitude   = -103.9697
+elevation_m = 2130
+bortle      = 2
+notes       = "Example dark-sky travel site (Capulin Volcano National Monument, NM)"

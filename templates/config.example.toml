@@ -1,0 +1,34 @@
+# =============================================================================
+# Astrophotography tracker - configuration  ·  EXAMPLE
+# =============================================================================
+# Copy to tracker/config.toml (bootstrap.py does this) and edit the paths.
+# config.toml is gitignored — it is the one per-machine file.
+#
+# Add one [[library]] block per capture library. Order does not matter.
+# A library whose `path` is not currently mounted is simply skipped on a run -
+# it stays listed here so it is picked up again once the drive is reconnected.
+#
+#   id    - short label, used as the library_id in the database (no spaces)
+#   path  - absolute path to the library's top folder
+#   label - human-readable name (optional; defaults to id)
+#   role  - "working" or "archive" (optional; defaults to "working")
+#
+# All values must be in double quotes.
+# =============================================================================
+
+[[library]]
+id    = "working"
+path  = "/Volumes/YourSSD/Astrophotography/Current Year Library"
+label = "Working library (current year)"
+role  = "working"
+
+[[library]]
+id    = "archive"
+path  = "/Volumes/YourNAS/Astrophotography/Lifetime Library"
+label = "Lifetime archive"
+role  = "archive"
+
+# Optional offline mirror. refresh.py copies the generated dashboard + xlsx here
+# (available when the libraries are dismounted). Remove this block to skip mirroring.
+[mirror]
+path = "/Users/you/Documents/Astrophotography"

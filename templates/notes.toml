@@ -1,0 +1,78 @@
+# =============================================================================
+# Per-session notes  ·  TOML format  ·  TEMPLATE
+# =============================================================================
+# Canonical template — lives in tracker/templates/ (git-tracked) and is
+# consumed by PostHaste, which stamps a copy into each new session folder.
+# Rename the copy to match its session folder:
+#   "<Target_id Scope Sensor YYYY-MM-DD> notes.toml"
+#
+# The file is named to match its session folder; the session's identity
+# (target, scope, sensor, date) is already in the folder name and in every
+# FITS filename, so it is not repeated here.
+#
+# Sections marked "auto" are filled by the tracker (populate_notes.py, or
+# refresh.py --notes). Hand-edit [observation] and anything a tool could not
+# fill. Leave a value as "" until it is known.
+# =============================================================================
+
+location      = "Home"      # key into _organization/locations.toml
+allsky_logged = false       # was the all-sky camera running this night?
+culled        = false       # flip to true after blinking a night where every frame was kept.
+                            # Nothing auto-edits this flag. The tracker DB derives the Culled
+                            # stage on its own when Rejected/ holds frames or the session has
+                            # been integrated — so this flag exists only for the one case the
+                            # files can't show: reviewed, and every frame kept.
+
+[sky]
+# Auto-computed from the session date and the location's coordinates.
+moon_phase        = ""      # e.g. "waxing gibbous"
+moon_illumination = ""      # percent illuminated, e.g. 73
+moon_age_days     = ""      # days since the new moon
+
+[weather]
+# Auto-pulled from a weather service for the session date and location.
+# source: "api:open-meteo" for now; change to "local-station" once the
+# home weather station is online and logging.
+source          = "api:open-meteo"
+temperature_c   = ""
+humidity_pct    = ""
+dewpoint_c      = ""
+cloud_cover_pct = ""
+wind_kph        = ""
+pressure_hpa    = ""
+conditions      = ""        # short text summary, e.g. "clear, light haze late"
+# Seeing and transparency are not reported by general weather APIs.
+# Fill by hand, from an astro forecast, or from future all-sky analysis.
+seeing          = ""
+transparency    = ""
+
+[allsky]
+# Pointers to this night's all-sky camera products, when the camera logged.
+keogram_path    = ""
+timelapse_path  = ""
+
+[observation]
+# Human notes from the night itself — equipment quirks, passing cloud,
+# satellite trails, subjective quality at the eyepiece or on the screen.
+notes = """
+"""
+
+[processing]
+# Commentary on processing this session's data: what was tried, what worked,
+# what to potentially repeat with new settings. This is NOT a copy of the
+# PixInsight .pxiproject — just notes about it and diagnostic observations.
+# E.g. "flats left dust shadows top-left", "blooming on the brightest stars",
+# "corners soft — possible sensor tilt".
+notes = """
+"""
+
+[future_processing]
+# Actionable to-do items for reprocessing or recapture. The tracker pulls
+# these across all sessions into one queryable processing to-do list, so
+# keep each item a short, self-contained line. Examples:
+#   todo = [
+#     "re-shoot flats — dust not fully removed",
+#     "try tilt correction before integrating",
+#     "reprocess with newer BlurXTerminator",
+#   ]
+todo = []

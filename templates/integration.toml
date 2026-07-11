@@ -1,0 +1,77 @@
+# =============================================================================
+# Integration manifest  ·  TOML format
+# =============================================================================
+# Marks a folder as a MULTI-SESSION or COMPOSITE integration. Scaffold one with
+#   python3 new_integration.py --target "M 81 Bodes Galaxy" \
+#       --rig "RASA8 ASI2600MCAir" --span all --goal 50 --apply
+# which creates the folder and a filled-in copy of this file.
+#
+#   {Target}/integrations/{integration name}/
+#       {name}.pxiproject          ← the PixInsight project
+#       PI Process/   PI Magic/    ← scratch (clean_processing.py clears these)
+#       {name} Results/            ← kept stacked master + finished images
+#       integration.toml           ← THIS FILE
+#
+# A single-session integration is just a processed session folder — it does NOT
+# use this file; its pipeline state lives in the session itself.
+#
+# Folder naming (living integration, no version):
+#       {target_id} {rig|composite} {span}
+#   e.g.  "M_81 RASA8 ASI2600MCAir all"   "M_81 composite 2026"
+# You re-stack the SAME folder as you add nights — no v1/v2 churn. Versioned
+# folders ("… v1") are only for deliberately frozen, published snapshots.
+#
+# Light and calibration frames are never copied here — the .pxiproject just
+# references them in the session folders. ingest.py reads this manifest.
+# =============================================================================
+
+[membership]
+# How the tracker decides which sessions belong to this integration.
+#   mode = "auto"  : resolve members from rig + span every ingest (grows as you
+#                    add nights — the default; nothing to maintain).
+#   mode = "pinned": use an explicit `members = [...]` list instead (frozen).
+mode = "auto"
+rig  = "RASA8 ASI2600MCAir"   # scope+sensor; OMIT this line for a composite (all rigs)
+span = "all"                  # "2026" | a range "2024-2026" | "all"
+goal_hours = 50               # optional integration-hours goal (drives the progress bar)
+# exclude = ["M_81 RASA8 ASI2600MCAir 2026-02-26"]   # optional: drop a bad night
+
+[built]
+# What you actually stacked into the CURRENT master — your truthful record and
+# the source of "built hours". Fill it after each stack with:
+#   python3 mark_integrated.py "<this integration folder>" --apply
+# It snapshots the sessions matching the rule. The gap between built and
+# available is the "stale" signal (captured, not yet stacked). data_through
+# (newest built night) and the stacking method (PixInsight vs PI Magic) are
+# derived by ingest — you record nothing but the session list.
+sessions = [
+  # "M_81 RASA8 ASI2600MCAir 2026-04-18",
+]
+
+# Legacy / pinned form (mode = "pinned"): an explicit member list lives here
+# instead of a rule. Kept for frozen snapshots.
+# members = [ "M_81 RASA8 ASI2600MCAir 2026-04-18", ... ]
+
+[pipeline]
+# Integrate is implied (this folder exists). Mark edited by hand when the
+# finished image is done. published/printed are DERIVED from the entries below —
+# don't set them here.
+edited = false
+
+# Publish / print ledger — repeatable blocks, one per event, added over time.
+# The dashboard's Published/Printed ledgers read these. Delete the examples.
+# [[published]]
+# kind  = "astrobin"        # astrobin | social | other
+# url   = "https://astrobin.com/…/"
+# title = "M 81 — 8.5h RASA8"
+# date  = "2026-05-10"
+#
+# [[printed]]
+# title = "16×24 metal, Bay Photo"
+# date  = "2026-07-20"
+
+[notes]
+# Free notes on this integration — what was combined and why, how it compares
+# to other versions, processing decisions.
+notes = """
+"""
