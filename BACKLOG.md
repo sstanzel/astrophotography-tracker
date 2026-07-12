@@ -89,7 +89,11 @@ The rev-2 paper still describes bias matching as per-camera, the separate
 (in `build_paper.js`, per the backport rule): gain-aware bias, the `[coverage]
 require_bias` recipe switch, the merged single coverage panel, masters-live-with-raws
 (no `Bias Masters/` folders — also removed from the `!Camera` template), and the
-newest-set-per-(camera, gain/ISO) bias retention policy.
+newest-set-per-(camera, gain/ISO) bias retention policy. Also fold in the
+2026-07-12 per-session match columns: `resolve_flats()` (here / with sibling /
+nearest / none) and `resolve_bias()` (newest camera+gain set, any date), both
+surfaced on the Sessions table and stamped into notes.toml as
+`flats_match`/`bias_match`.
 
 ## Open design questions (paper §11)
 
@@ -107,6 +111,23 @@ Tracked in the paper; listed here so the backlog is one-stop:
 ---
 
 ## Done
+
+- **Bias match column + notes.toml match stamping** — shipped 2026-07-12, designed
+  the same day (parity ask: flats got nearest-match logic, bias deserved the same).
+  `resolve_bias()` derives a per-session bias suggestion: `here` → notes pointer
+  (`[calibration] bias = "<library set>"`, trailing-path form accepted; a stale
+  pointer falls through to auto) → `master` → `raws` → `none`, matching the
+  session's camera (sensor) + most-common kept-light gain against
+  `_Calibration Library/Bias` and picking the **newest set regardless of date**
+  (decided with Steve: bias is time-stable — no dust/rotation constraint like
+  flats' strictly-before rule — and a restack today would load the best bias
+  owned now). Informational regardless of `require_bias`; the coverage panel
+  still owns "is bias needed". Faces: Sessions-table **Bias** column
+  (`master 2026-04-18`), xlsx Bias Source/Location, and — new for flats too —
+  `populate_notes.py` stamps tracker-owned `flats_match`/`bias_match` keys into
+  every session's `[calibration]` (refreshed each run, inserted when missing).
+  First run: 206 master / 16 none (no bias data: PoseidonCPro, minicam8, and a
+  Gain80 ASI585MCPro night with no Gain80 set).
 
 - **Closest-flat logic in `resolve_flats()`** — shipped 2026-07-12. Sibling
   matching widened from same-date-only to same day **or the day after** (the

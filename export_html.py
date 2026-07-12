@@ -155,6 +155,16 @@ def main():
                                                - julianday(substr(s.flats_ref,-10)) AS INTEGER)
                                        ||'d prior)'
                                      ELSE COALESCE(s.flats_source,'') END AS flats,
+                                   -- 'master'/'raws' add the matched set's date
+                                   -- ('master 2026-04-18') — bias_ref is a library
+                                   -- set folder ending in YYYY-MM-DD
+                                   CASE WHEN s.bias_source IN ('master','raws')
+                                     THEN s.bias_source||' '||
+                                       CASE WHEN s.bias_ref GLOB
+                                                 '*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                                            THEN substr(s.bias_ref,-10)
+                                            ELSE COALESCE(s.bias_ref,'?') END
+                                     ELSE COALESCE(s.bias_source,'') END AS bias,
                                    s.is_other_capture AS other
                             FROM sessions s JOIN targets t USING(target_id)
                             JOIN v_session_pipeline vp ON vp.session_id = s.session_id
@@ -866,7 +876,7 @@ function sortableTable(tblEl, cols, data, opts){
     ["session_date","Date"],["target_id","Target ID"],["common_name","Name"],
     ["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],
     ["rejected","Rejected","num"],["hours","Hours","num"],["flats","Flats"],
-    ["stage","Stage"],["method","Method"],["library","Library"],
+    ["bias","Bias"],["stage","Stage"],["method","Method"],["library","Library"],
   ];
   let sortKey="session_date", sortDir=-1;
   const tbl = document.getElementById("sessionsTable");
