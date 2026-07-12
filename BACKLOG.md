@@ -89,7 +89,33 @@ The rev-2 paper still describes bias matching as per-camera, the separate
 (in `build_paper.js`, per the backport rule): gain-aware bias, the `[coverage]
 require_bias` recipe switch, the merged single coverage panel, masters-live-with-raws
 (no `Bias Masters/` folders — also removed from the `!Camera` template), and the
-newest-set-per-(camera, gain/ISO) bias retention policy.
+newest-set-per-(camera, gain/ISO) bias retention policy. Also fold in the
+data-quality checks catalog (CHECKS.md, added 2026-07-12 with scrub.py) as the
+paper's reviewable list of every anomaly the system looks for.
+
+## Ingest: don't count frames inside PI Process/ + PI Magic/ scratch
+
+**Status:** ready · 2026-07-12
+
+The first scrub.py run found 3 lights counted from `PI Magic/…/Discarded/`
+copies (SCRATCH_FRAME) — each also fires DUPLICATE_FRAME because the original
+is still in `Light/`, so integration hours are inflated (~0.25 h today). Right
+fix is at the source: the ingest session walker should skip the `PI Process/`
+and `PI Magic/` subtrees entirely (they are recreatable scratch, same rationale
+as `clean_processing.py`). Keep both scrub checks afterwards as regression
+guards. Interim workaround: `clean_processing.py --apply` then re-ingest.
+
+## Graduate scrub error checks into every-ingest validate()
+
+**Status:** idea · 2026-07-12
+
+scrub.py's error-severity checks (DUPLICATE_FRAME, SCRATCH_FRAME, MIXED_CAMERA,
+ZERO_BYTE_FRAME, UNDERSIZED_FRAME) are cheap DB queries and catch
+wrong-totals bugs — candidates for running in every ingest's validate() so
+they surface on the dashboard's Data Health panel, with scrub.py remaining the
+place for the judgment-call warnings/info (mixed settings, reject rates,
+rotation drift) and the cross-library disk pass. Decide after living with the
+scrub for a while.
 
 ## Open design questions (paper §11)
 
