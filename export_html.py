@@ -276,7 +276,7 @@ def main():
         "capture": rows("""
             SELECT t.target_id,
                    ROUND(COALESCE(SUM(s.integration_s),0)/3600.0,1) AS hours,
-                   -- a target's sessions can sit on both drives
+                   -- a target's sessions can span multiple libraries
                    GROUP_CONCAT(DISTINCT s.library_id) AS library,
                    g.goal_hours AS goal,
                    ROUND(g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0,1) AS gap,

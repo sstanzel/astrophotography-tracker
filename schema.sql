@@ -10,7 +10,7 @@
 --   - Vocabulary tables mirror /_organization/ folders; the disk is still the
 --     authority — these are populated by the scan.
 --   - All paths are stored relative to a library root so the same row works
---     whether the file is on stream or peak.
+--     no matter which library holds the file.
 -- =============================================================================
 
 PRAGMA foreign_keys = ON;

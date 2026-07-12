@@ -247,12 +247,12 @@ def main() -> None:
     ap.add_argument(
         "--staging",
         default=default_staging,
-        help=f"staged-sessions folder (default: <working library>/{STAGING_DIRNAME})",
+        help=f"staged-sessions folder (default: <first mounted working library>/{STAGING_DIRNAME})",
     )
     ap.add_argument(
         "--library",
         default=default_library,
-        help="destination library root (default: the working library)",
+        help="destination library root (default: the first mounted working library)",
     )
     ap.add_argument(
         "--apply",
