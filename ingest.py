@@ -1640,54 +1640,8 @@ def ingest_calibration(con, library_id, root, obs, log):
             )
             n += 1
 
-    # --- Flat: {Scope_Sensor}/{Flat ... date} sets, in either home ---
-    # _Calibration Library/Flat is the conventional spot; _Flat older is the
-    # legacy pile at the library root (the session walk skips it as a
-    # _-prefixed folder, so it is scanned here). Flat rows feed the sessions
-    # table's flats_source='library' resolution, not the coverage report
-    # (flats are per-session by design). The sensor token goes in the camera
-    # column, same as bias/dark sets.
-    for flat_root in (os.path.join(cal_root, "Flat"), os.path.join(root, "_Flat older")):
-        if not os.path.isdir(flat_root):
-            continue
-        for combo in os.listdir(flat_root):
-            if combo.startswith(".") or combo.startswith("!"):
-                continue
-            combodir = os.path.join(flat_root, combo)
-            if not os.path.isdir(combodir):
-                continue
-            if "_" not in combo:
-                obs["cal_badname"].append(os.path.relpath(combodir, root))
-            scope = combo.split("_", 1)[0] if "_" in combo else combo
-            sensor = combo.split("_", 1)[1] if "_" in combo else None
-            for sub in os.listdir(combodir):
-                if sub.startswith(".") or "template" in sub.lower() or "example" in sub.lower():
-                    continue
-                sp = os.path.join(combodir, sub)
-                if not os.path.isdir(sp):
-                    continue
-                fc, sz = count_tree(sp)
-                if fc == 0:
-                    obs["cal_empty"].append(os.path.relpath(sp, root))
-                    continue
-                rel = os.path.relpath(sp, root)
-                upsert(
-                    {
-                        "library_id": library_id,
-                        "class": "flat",
-                        "folder_path": rel,
-                        "camera": sensor,
-                        "scope": scope,
-                        "temperature_c": None,
-                        "gain": None,
-                        "exp_s": None,
-                        "capture_date": date_of(sub),
-                        "frame_count": fc,
-                        "total_size_bytes": sz,
-                        "is_generated_master": 1 if has_master_file(sp) else 0,
-                    }
-                )
-                n += 1
+    # No flat scan: flats are per-session (decided 2026-07-12, paper §11) and
+    # live in session folders, never in a calibration library.
 
     con.commit()
     log(f"  {library_id}: {n} calibration sets")
@@ -1701,33 +1655,22 @@ def resolve_flats(con):
       1. 'here'          — the session folder holds flat frames.
       2. 'with sibling'  — the notes.toml [calibration] flats pointer, or a
                            same-rig same-night session that holds flats.
-      3. 'library'       — a flat set in _Flat older / _Calibration Library
-                           for the same rig within ±1 day (next-morning flats
-                           carry the next civil date).
-      4. 'none'          — no flats found anywhere for this session.
+      3. 'none'          — no flats exist for this session.
 
-    Runs after all libraries are scanned (siblings can live in either library)
-    and recomputes every row, so nothing goes stale between ingests.
+    Flats are per-session (decided 2026-07-12, paper §11) — there is no flat
+    library to fall back on. Runs after all libraries are scanned (siblings can
+    live in either library) and recomputes every row, so nothing goes stale
+    between ingests.
 
     Args:
         con: open SQLite connection; commits its own update.
     """
-
-    def day_diff(a, b):
-        return abs((datetime.date.fromisoformat(a) - datetime.date.fromisoformat(b)).days)
-
     cur = con.cursor()
     sess = cur.execute("""SELECT session_id, scope, sensor, session_date, flats_count,
                   flats_note_ref, folder_path FROM sessions""").fetchall()
     siblings = {}  # (scope, sensor, date) -> [(flats_count, folder name), ...]
     for _sid, scope, sensor, date, fc, _note, fp in sess:
         siblings.setdefault((scope, sensor, date), []).append((fc, os.path.basename(fp)))
-    lib_sets = {}  # (scope, sensor) -> [(capture_date, folder_path), ...]
-    for scope, camera, cdate, fp in cur.execute(
-        """SELECT scope, camera, capture_date, folder_path FROM calibration_masters
-           WHERE class='flat' AND capture_date IS NOT NULL AND camera IS NOT NULL"""
-    ):
-        lib_sets.setdefault((scope, camera), []).append((cdate, fp))
 
     updates = []
     for sid, scope, sensor, date, fc, note, fp in sess:
@@ -1738,15 +1681,8 @@ def resolve_flats(con):
             updates.append(("with sibling", note, sid))
         else:
             sibs = [x for x in siblings[(scope, sensor, date)] if x[0] > 0 and x[1] != me]
-            near = [
-                (day_diff(cdate, date), cdate, p)
-                for cdate, p in lib_sets.get((scope, sensor), [])
-                if day_diff(cdate, date) <= 1
-            ]
             if sibs:
                 updates.append(("with sibling", max(sibs)[1], sid))
-            elif near:
-                updates.append(("library", min(near)[2], sid))
             else:
                 updates.append(("none", None, sid))
     cur.executemany("UPDATE sessions SET flats_source=?, flats_ref=? WHERE session_id=?", updates)
@@ -2217,21 +2153,11 @@ def validate(con, locations, obs, log):
 
     for rel in obs.get("cal_empty", []):
         add("info", "CAL_EMPTY", "calibration", None, rel, "Calibration folder contains no frames.")
-    for rel in obs.get("cal_badname", []):
-        add(
-            "warning",
-            "CAL_NAMING",
-            "calibration",
-            None,
-            rel,
-            "Flat calibration folder name is missing its Scope_Sensor token.",
-        )
 
     # Calibration folders vs the registry. Sessions are checked above
-    # (UNKNOWN_SCOPE/UNKNOWN_SENSOR); a mistyped Bias/Dark camera folder or
-    # Flat Scope_Sensor combo would otherwise slip through — and a camera
-    # folder that isn't the registry sensor name can never match any light
-    # in the coverage report.
+    # (UNKNOWN_SCOPE/UNKNOWN_SENSOR); a mistyped Bias/Dark camera folder
+    # would otherwise slip through — and a camera folder that isn't the
+    # registry sensor name can never match any light in the coverage report.
     def in_registry(table, col, name):
         r = cur.execute(f"SELECT from_registry FROM {table} WHERE {col}=?", (name,)).fetchone()
         return bool(r and r[0])
@@ -2248,37 +2174,6 @@ def validate(con, locations, obs, log):
                 None,
                 f"_Calibration Library/{cls.capitalize()}/{cam}",
                 f"Calibration camera folder '{cam}' is not in " f"_organization/sensor_values.",
-            )
-
-    seen_combos = set()
-    for (fp,) in cur.execute("SELECT folder_path FROM calibration_masters WHERE class='flat'"):
-        # _Calibration Library/Flat/{Scope_Sensor}/{set} or _Flat older/{Scope_Sensor}/{set}
-        parts = fp.split("/")
-        if len(parts) < 3 or parts[-2] in seen_combos:
-            continue
-        combo = parts[-2]
-        seen_combos.add(combo)
-        if "_" not in combo:
-            continue  # CAL_NAMING above already flags the missing token
-        ref = "/".join(parts[:-1])
-        scope_tok, sensor_tok = combo.split("_", 1)
-        if not in_registry("scopes", "scope", scope_tok):
-            add(
-                "warning",
-                "CAL_UNKNOWN_SCOPE",
-                "calibration",
-                None,
-                ref,
-                f"Flat combo scope '{scope_tok}' is not in " f"_organization/scope_values.",
-            )
-        if not in_registry("sensors", "sensor", sensor_tok):
-            add(
-                "warning",
-                "CAL_UNKNOWN_CAMERA",
-                "calibration",
-                None,
-                ref,
-                f"Flat combo sensor '{sensor_tok}' is not in " f"_organization/sensor_values.",
             )
 
     # integrations — structural (from the walk)
@@ -2408,7 +2303,6 @@ def main():
     obs = {
         "unparsed_sessions": [],
         "cal_empty": [],
-        "cal_badname": [],
         "integration_no_manifest": [],
         "integration_missing_member": [],
         "integration_kind_mismatch": [],

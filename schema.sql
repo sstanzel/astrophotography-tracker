@@ -119,12 +119,12 @@ CREATE TABLE sessions (
     darks_count         INTEGER DEFAULT 0,
     bias_count          INTEGER DEFAULT 0,
     integration_s       REAL DEFAULT 0.0,    -- summed exp_s for kept lights, only when unit=s
-    -- where this session's flats live (derived every ingest by resolve_flats):
+    -- where this session's flats live (derived every ingest by resolve_flats;
+    -- flats are per-session, there is no flat library):
     -- 'here' (in this folder) | 'with sibling' (a same-rig same-night session
-    -- holds the shared set) | 'library' (a flat set in _Flat older or
-    -- _Calibration Library/Flat, matched by rig within ±1 day) | 'none'
+    -- holds the shared set) | 'none'
     flats_source        TEXT,
-    flats_ref           TEXT,                -- sibling session folder name or library set path
+    flats_ref           TEXT,                -- sibling session folder name when 'with sibling'
     flats_note_ref      TEXT,                -- notes.toml [calibration] flats pointer, verbatim
     -- session-level metadata (parsed from notes.rtf if filled in)
     mount               TEXT,

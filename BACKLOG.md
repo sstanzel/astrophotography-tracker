@@ -24,7 +24,7 @@ Problem: setting up WBPP means burrowing into deep set folders
 - Add a generated `_Masters/` shelf at the calibration library root: a flat folder of
   **copies** (not symlinks — Alienware/SMB may not resolve Mac symlinks) of every
   `master*` file, rebuilt by `refresh.py` (or a small `shelve_masters.py`). Leading
-  `_` keeps it invisible to ingest, same as `_Flat older/`.
+  `_` keeps it invisible to ingest (top-level `_`-prefixed folders are skipped).
 - The shelf is a derived artifact like the dashboard — never hand-maintained, safe to
   delete, rebuilt next refresh. ~40 lines of code.
 - Deferred 2026-07-11: may not be needed; revisit after actually building the first
@@ -110,17 +110,17 @@ Tracked in the paper; listed here so the backlog is one-stop:
 
 - **Flats with sessions + Flats column (paper §11 question resolved)** — shipped
   2026-07-12. Decision: flats are per-session everywhere; the shared-by-date flat
-  library is retired. `file_flats.py` (kept, preview-by-default) moved 83 legacy
-  `_Flat older/` sets (~166 GB) into their matching sessions (rig+date, ±1 day for
-  next-morning sets), stamped 53 shared-night sibling pointers
-  (`[calibration] flats = "<host session>"` in notes.toml — new template section),
-  deleted 2 MD5-verified duplicate sets, and left 2 orphans (2024-11-21 and
-  2026-03-27 Redcat51_ASI585MCPro) in `_Flat older/`. Tracker side:
-  `resolve_flats()` in ingest derives a per-session flats location
-  (`here` / `with sibling` / `library` / `none`) every ingest; shown as the
-  Sessions-table **Flats** column (dashboard + xlsx, which also gets Flats
-  Location). Ingest now scans `_Flat older/` flat sets into
-  `calibration_masters` (class `flat`, sensor in the camera column).
+  library is retired completely. `file_flats.py` (one-time; retired after running,
+  in git history at 1e9570b) moved 83 legacy `_Flat older/` sets (~166 GB) into
+  their matching sessions (rig+date, ±1 day for next-morning sets), stamped 53
+  shared-night sibling pointers (`[calibration] flats = "<host session>"` in
+  notes.toml — new template section), and deleted 2 MD5-verified duplicate sets.
+  The 2 orphan sets (2024-11-21 + 2026-03-27 Redcat51_ASI585MCPro, no matching
+  session) were then deleted along with `_Flat older/` itself; all flat-library
+  scanning (`_Calibration Library/Flat/` + `_Flat older/`) was removed from
+  ingest. Tracker side: `resolve_flats()` derives a per-session flats location
+  (`here` / `with sibling` / `none`) every ingest; shown as the Sessions-table
+  **Flats** column (dashboard + xlsx, which also gets Flats Location).
 - **Work Queue "see notes" marker** — shipped 2026-07-11, same day it was designed.
   Sessions with open `[future_processing]` to-dos show a `see notes` marker in the
   To cull / To integrate / To edit lists (dashboard + `worklist.py`), so a session
