@@ -121,6 +121,34 @@ Single-night sessions need no scaffolding — a session with files in its `Resul
 folder is already "integrated"; the method (PixInsight / PI Magic) is auto-detected
 from which working folder was used.
 
+## Building calibration masters (Bias + Dark)
+
+`worklist.py masters` lists the library sets with raws but no master. Point
+WBPP at a set folder and stack it — WBPP drops its output *inside* the set as
+`master/master….xisf` + a `logs/` folder, which is not where masters live
+(the convention is master-next-to-raws; ingest would see those subfolders as
+phantom sets). After any WBPP run(s):
+
+```bash
+python3 file_masters.py               # preview what would be filed
+python3 file_masters.py --apply       # file + rename the masters, sweep WBPP scratch
+python3 refresh.py                    # tracker picks up the new masters
+```
+
+For every Bias/Dark set holding WBPP output it moves the master up next to
+the raws, renamed to the convention (every token comes from the set's place
+in the tree; ASIAir-named sets with no date in the folder name are dated by
+their newest frame):
+
+    masterBias_ASI585MCPro_gain200_2026-02-10.xisf
+    masterDark_ASI585MCPro_300s_gain0_-10C_2024-12-19.xisf
+
+then deletes the emptied `master/` and the `logs/` folders (WBPP scratch —
+recreatable by re-running the stack). Safe to re-run any time; it also
+renames a WBPP-named master sitting loose in a set folder. Batch-friendly:
+stack as many sets as you like, then one `file_masters.py --apply` files
+them all.
+
 ## Reclaiming space (safe by construction)
 
 ```bash
@@ -221,6 +249,7 @@ date  = "2026-05-12"
 | `worklist.py` | Print the Work Queue | `summary` (default) \| `capture coverage masters cull integrate restack edit all` |
 | `new_integration.py` | Scaffold a living multi-session integration | `--target`, `--rig`, `--span`, `--goal`, `--built`, `--apply` |
 | `mark_integrated.py` | Record sessions stacked into a master | `<dir>`, `--apply`, `--clear` |
+| `file_masters.py` | File WBPP-built Bias/Dark masters next to their raws (rename to convention, sweep `master/`+`logs/`) | `--apply` |
 | `promote_masters.py` | Copy keepers into `Results/` | `--apply`, `--only` |
 | `clean_processing.py` | Empty PI scratch folders (keeper-safe) | `--apply`, `--only`, `--promote` |
 | `populate_notes.py` | Back-fill moon/weather + stamp flats/bias matches into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only`, `--db` |

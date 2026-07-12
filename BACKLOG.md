@@ -30,20 +30,6 @@ Problem: setting up WBPP means burrowing into deep set folders
 - Deferred 2026-07-11: may not be needed; revisit after actually building the first
   masters and feeling the WBPP friction (or not).
 
-## Master file naming convention
-
-**Status:** proposed, not yet adopted · 2026-07-11
-
-Encode full params in the master filename at build time so the file is
-self-describing in WBPP and anywhere it gets copied:
-
-    masterBias_ASI2600MCAir_gain100_2026-02-10.xisf
-    masterDark_ASI2600MCAir_300s_gain100_-10C_2026-02-10.xisf
-
-`has_master_file()` only requires the `master` prefix, so this is free for the
-tracker. WBPP auto-classifies `master*` files. Adopt when building the first masters;
-then record in the paper's calibration section.
-
 ## Calibration master lineage (`calibration_master_inputs`)
 
 **Status:** schema built, never populated · noted 2026-07-10
@@ -141,6 +127,17 @@ Tracked in the paper; listed here so the backlog is one-stop:
 
 ## Done
 
+- **Master file naming convention + `file_masters.py`** — adopted/shipped 2026-07-12.
+  The proposed self-describing names are now the convention, enforced by the new
+  reusable `file_masters.py` (preview/`--apply`): after any WBPP run on a Bias/Dark
+  set it moves `master/master….xisf` up next to the raws renamed to
+  `masterBias_{Camera}_{gain###|ISO####}_{date}.xisf` /
+  `masterDark_{Camera}_{exp}_{gain###|ISO####}_{temp}_{date}.xisf` (tokens from the
+  tree position; date falls back to the newest frame stamp for ASIAir-named sets)
+  and sweeps the `master/`+`logs/` WBPP scratch that ingest would otherwise see as
+  phantom sets. First run filed the two 2026-07-11 ASI585MCPro -10C dark masters
+  and swept 3 leftover bias `logs/` folders. Still to record in the paper's
+  calibration section at the next revision (see rev-3 item).
 - **Bias match column + notes.toml match stamping** — shipped 2026-07-12, designed
   the same day (parity ask: flats got nearest-match logic, bias deserved the same).
   `resolve_bias()` derives a per-session bias suggestion: `here` → notes pointer
