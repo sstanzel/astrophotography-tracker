@@ -25,7 +25,11 @@ QUERIES = {
         """
         SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
                s.lights_kept AS lights, s.lights_rejected AS rejected,
-               s.integration_s/3600.0 AS hours, s.library_id AS library
+               s.integration_s/3600.0 AS hours,
+               CASE WHEN EXISTS(SELECT 1 FROM processing_todos pt
+                                WHERE pt.session_id=s.session_id)
+                    THEN 'see notes' ELSE '' END AS notes,
+               s.library_id AS library
         FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
         WHERE NOT s.is_other_capture AND vp.furthest_stage='1 Captured'
@@ -36,6 +40,9 @@ QUERIES = {
         """
         SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
                s.lights_kept AS lights, s.integration_s/3600.0 AS hours,
+               CASE WHEN EXISTS(SELECT 1 FROM processing_todos pt
+                                WHERE pt.session_id=s.session_id)
+                    THEN 'see notes' ELSE '' END AS notes,
                s.library_id AS library
         FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
@@ -47,6 +54,9 @@ QUERIES = {
         """
         SELECT s.target_id AS target, s.session_date||' '||s.scope||' '||s.sensor AS image,
                'session' AS type, s.integration_s/3600.0 AS hours,
+               CASE WHEN EXISTS(SELECT 1 FROM processing_todos pt
+                                WHERE pt.session_id=s.session_id)
+                    THEN 'see notes' ELSE '' END AS notes,
                s.library_id AS library
         FROM sessions s
         WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
@@ -55,6 +65,7 @@ QUERIES = {
                (SELECT SUM(ss.integration_s)/3600.0 FROM integration_members im
                 JOIN sessions ss ON ss.session_id=im.session_id
                 WHERE im.integration_id=i.integration_id),
+               '',
                i.library_id
         FROM integrations i WHERE i.stage_edit<2
         ORDER BY hours DESC""",

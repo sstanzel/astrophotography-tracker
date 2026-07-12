@@ -78,6 +78,11 @@ python3 worklist.py all
 
 Same panels as the dashboard's Work Queue — this is the CLI face.
 
+A **`see notes`** marker on a cull / integrate / edit row means the session has
+open to-dos in its `notes.toml` `[future_processing]` list — read them before
+working that row (typically "this stack already failed once, here's why"). The
+marker clears itself when you delete the todo line from the notes file.
+
 ## Blinking a session (culling)
 
 Pull bad frames into the session's `Rejected/` folder — that alone marks the

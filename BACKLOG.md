@@ -107,6 +107,14 @@ Tracked in the paper; listed here so the backlog is one-stop:
 
 ## Done
 
+- **Work Queue "see notes" marker** — shipped 2026-07-11, same day it was designed.
+  Sessions with open `[future_processing]` to-dos show a `see notes` marker in the
+  To cull / To integrate / To edit lists (dashboard + `worklist.py`), so a session
+  that already failed a stack (the motivating case: `M_82 Redcat51 ASI585MCPro
+  2025-02-16`, then `M_101 Redcat51 ASI585MCPro 2024-12-07`, both failed in PI Magic
+  Studio on the Alienware leaving no file trace in the session folder) warns before
+  a blind re-run. No new flag — a join against the existing `processing_todos` table;
+  the marker clears itself when the todo line is deleted from notes.toml.
 - **Gain-aware bias tracking + bias-optional coverage** — shipped 2026-07-11.
   `detect_set_gain()` parses gain/ISO tokens into `calibration_masters.gain`; coverage
   matches bias per (camera, gain); `[coverage] require_bias` in

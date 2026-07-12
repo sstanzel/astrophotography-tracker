@@ -226,7 +226,9 @@ def main():
                               (SELECT COUNT(*) FROM frames f
                                WHERE f.session_id=s.session_id AND f.frame_type='light'
                                  AND NOT f.is_rejected
-                                 AND (f.hfr>3.0 OR f.rms_arcsec>1.5)) AS qc_flags
+                                 AND (f.hfr>3.0 OR f.rms_arcsec>1.5)) AS qc_flags,
+                              (SELECT COUNT(*) FROM processing_todos pt
+                               WHERE pt.session_id=s.session_id) AS todos
                        FROM sessions s JOIN targets t USING(target_id)
                        JOIN v_session_pipeline vp ON vp.session_id=s.session_id
                        WHERE NOT s.is_other_capture AND vp.furthest_stage='{stage}'
@@ -236,14 +238,17 @@ def main():
         SELECT s.target_id, (s.session_date||'  '||s.scope||' '||s.sensor) AS image,
                'session' AS type, ROUND(s.integration_s/3600.0,2) AS hours,
                COALESCE(s.integration_method,'') AS method,
-               s.library_id AS library
+               s.library_id AS library,
+               (SELECT COUNT(*) FROM processing_todos pt
+                WHERE pt.session_id=s.session_id) AS todos
         FROM sessions s JOIN targets t USING(target_id)
         WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
         UNION ALL
         SELECT i.target_id, i.folder_name AS image, 'integration' AS type,
                ROUND(SUM(mem.integration_s)/3600.0,2) AS hours,
                COALESCE(i.integration_method,'') AS method,
-               i.library_id AS library
+               i.library_id AS library,
+               0 AS todos
         FROM integrations i JOIN targets t USING(target_id)
         LEFT JOIN (SELECT im.integration_id, s.integration_s FROM integration_members im
                    JOIN sessions s ON s.session_id=im.session_id) mem
@@ -705,10 +710,13 @@ function sortableTable(tblEl, cols, data, opts){
 // ---- Work Queue ----
 (function(){
   const WL = D.worklists || {};
+  // session has open [future_processing] to-dos in its notes.toml — read them
+  // before working this row (e.g. a stack that already failed once)
+  const seeNotes = n => n ? '<span class="pill todo">see notes</span>' : "";
   const SPEC = {
-    cull:      {label:"To cull",      cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rejected","num"],["qc_flags","QC flags","num"],["hours","Hours","num",r=>fmtHM(r.hours)],["library","Library"]]},
-    integrate: {label:"To integrate", cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hours","num",r=>fmtHM(r.hours)],["library","Library"]]},
-    edit:      {label:"To edit",      cols:[["target_id","Target"],["image","Image"],["type","Type"],["hours","Hours","num",r=>fmtHM(r.hours)],["method","Method"],["library","Library"]]},
+    cull:      {label:"To cull",      cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rejected","num"],["qc_flags","QC flags","num"],["hours","Hours","num",r=>fmtHM(r.hours)],["todos","Notes",null,r=>seeNotes(r.todos)],["library","Library"]]},
+    integrate: {label:"To integrate", cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hours","num",r=>fmtHM(r.hours)],["todos","Notes",null,r=>seeNotes(r.todos)],["library","Library"]]},
+    edit:      {label:"To edit",      cols:[["target_id","Target"],["image","Image"],["type","Type"],["hours","Hours","num",r=>fmtHM(r.hours)],["method","Method"],["todos","Notes",null,r=>seeNotes(r.todos)],["library","Library"]]},
     restack:   {label:"Restack",      cols:[["target_id","Target"],["folder_name","Integration"],["built_hours","Built","num",r=>fmtHM(r.built_hours)],["available_hours","Available","num",r=>fmtHM(r.available_hours)],["behind","Behind","num",r=>fmtHM(r.behind)],["library","Library"]]},
     capture:   {label:"Capture more", cols:[["target_id","Target"],["hours","Hours","num",r=>fmtH(r.hours)],["goal","Goal","num",r=>fmtH(r.goal)],["gap","Gap","num",r=>fmtH(r.gap)],["priority","Priority","num"],["library","Library"]]},
     masters:   {label:"Build masters",cols:[["class","Class"],["camera","Camera"],["temp","Temperature","num"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["frames","Frames","num"],["library","Library"]]},
