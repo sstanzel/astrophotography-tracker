@@ -2,7 +2,7 @@
 """
 ingest.py — populate the astrophotography tracker SQLite database.
 
-Walks both capture libraries (stream + peak), parses every session folder and
+Walks every configured capture library, parses every session folder and
 FITS filename, walks the shared calibration library, and upserts everything into
 the schema defined in schema.sql.
 
@@ -1684,9 +1684,9 @@ def resolve_flats(con):
       4. 'none'          — the rig has no flats on or before this date.
 
     Flats are per-session (decided 2026-07-12, paper §11) — there is no flat
-    library to fall back on. Runs after all libraries are scanned (siblings can
-    live in either library) and recomputes every row, so nothing goes stale
-    between ingests.
+    library to fall back on. Runs after all libraries are scanned (a session and
+    its flat-holding sibling can live in any library, not necessarily the same
+    one) and recomputes every row, so nothing goes stale between ingests.
 
     Args:
         con: open SQLite connection; commits its own update.
@@ -2449,8 +2449,8 @@ def main():
         ingest_calibration(con, lib["id"], root, obs, log)
         ingest_integrations(con, lib["id"], root, obs, log)
 
-    # Both libraries scanned — a session's flats may sit with a sibling in
-    # either one, so the flats-location pass runs after the loop.
+    # All libraries scanned — a session's flats may sit with a sibling in
+    # any library, so the flats-location pass runs after the loop.
     resolve_flats(con)
     resolve_bias(con)
 
