@@ -25,6 +25,7 @@ After bootstrapping: edit config.toml (library paths), fill in the copied
 tomls, add your cameras/scopes/targets to the registry directories, then run
 `python3 refresh.py`. See USAGE.md "Fresh start".
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,7 +33,7 @@ import os
 import shutil
 
 TRACKER_DIR = os.path.dirname(os.path.abspath(__file__))
-ORG_DIR = os.path.dirname(TRACKER_DIR)          # _organization/ by position
+ORG_DIR = os.path.dirname(TRACKER_DIR)  # _organization/ by position
 TEMPLATES_DIR = os.path.join(TRACKER_DIR, "templates")
 
 REGISTRY_DIRS = [
@@ -85,12 +86,16 @@ def main() -> None:
         created += 1
         print(f"  {'would create' if args.dry_run else 'created':12} {rel}")
 
-    print(f"\n{'DRY RUN - ' if args.dry_run else ''}{created} item(s) "
-          f"{'to create' if args.dry_run else 'created'}")
+    print(
+        f"\n{'DRY RUN - ' if args.dry_run else ''}{created} item(s) "
+        f"{'to create' if args.dry_run else 'created'}"
+    )
     if created and not args.dry_run:
-        print("\nNext: edit tracker/config.toml (library paths), fill in the "
-              "copied tomls,\nadd cameras/scopes/targets to the registry "
-              "directories, then run: python3 refresh.py")
+        print(
+            "\nNext: edit tracker/config.toml (library paths), fill in the "
+            "copied tomls,\nadd cameras/scopes/targets to the registry "
+            "directories, then run: python3 refresh.py"
+        )
 
 
 if __name__ == "__main__":

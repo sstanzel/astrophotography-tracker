@@ -15,21 +15,22 @@ Usage:
 
 Run after ingest.py to refresh the workbook.
 """
+
 import os, sys, sqlite3, argparse, datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-FONT       = "Arial"
-HEADER_BG  = "1F3A5F"
-HEADER_FG  = "FFFFFF"
-BAND_BG    = "F2F5F9"
-TOTAL_BG   = "EAEFF5"
+FONT = "Arial"
+HEADER_BG = "1F3A5F"
+HEADER_FG = "FFFFFF"
+BAND_BG = "F2F5F9"
+TOTAL_BG = "EAEFF5"
 
 HEADER_FONT = Font(name=FONT, bold=True, color=HEADER_FG, size=10)
-CELL_FONT   = Font(name=FONT, size=10)
-BOLD_FONT   = Font(name=FONT, bold=True, size=10)
-TITLE_FONT  = Font(name=FONT, bold=True, size=14, color=HEADER_BG)
+CELL_FONT = Font(name=FONT, size=10)
+BOLD_FONT = Font(name=FONT, bold=True, size=10)
+TITLE_FONT = Font(name=FONT, bold=True, size=14, color=HEADER_BG)
 thin = Side(style="thin", color="D0D7E2")
 BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 
@@ -60,7 +61,7 @@ def write_sheet(ws, headers, rows, col_formats=None, freeze="A2"):
     # auto-width
     for c in range(1, len(headers) + 1):
         letter = get_column_letter(c)
-        longest = len(str(headers[c-1]))
+        longest = len(str(headers[c - 1]))
         for r in range(2, min(len(rows) + 2, 400)):
             v = ws.cell(row=r, column=c).value
             if v is not None:
@@ -72,7 +73,9 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser(description="Generate the tracker xlsx from tracker.db")
     ap.add_argument("--db", default=os.path.join(here, "tracker.db"))
-    ap.add_argument("--out", default=os.path.join(here, "Astrophotography tracker (generated).xlsx"))
+    ap.add_argument(
+        "--out", default=os.path.join(here, "Astrophotography tracker (generated).xlsx")
+    )
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
@@ -84,15 +87,25 @@ def main():
     wb = Workbook()
 
     def has_table(name):
-        return cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
-                           "AND name=?", (name,)).fetchone() is not None
+        return (
+            cur.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' " "AND name=?", (name,)
+            ).fetchone()
+            is not None
+        )
 
     has_integrations = has_table("integrations")
     has_validation = has_table("validation_findings")
 
-    STAGE_TEXT = {0: "0 Planned", 1: "1 Captured", 2: "2 Culled",
-                  3: "3 Integrated", 4: "4 Edited", 5: "5 Published",
-                  6: "6 Printed"}
+    STAGE_TEXT = {
+        0: "0 Planned",
+        1: "1 Captured",
+        2: "2 Culled",
+        3: "3 Integrated",
+        4: "4 Edited",
+        5: "5 Published",
+        6: "6 Printed",
+    }
 
     # ---------------------------------------------------------------- Sessions
     ws = wb.active
@@ -101,11 +114,33 @@ def main():
     # E Scope F Sensor G SessionDate H Year I Lights J Rejected K Flats
     # L DarkFlats M Darks N Bias O Integration P Capture Q Blink R Calibrate
     # S OtherCapture T FolderPath
-    s_headers = ["Library", "Target ID", "Catalog", "Name", "Scope", "Sensor",
-                 "Session Date", "Year", "Lights", "Rejected", "Flats", "Dark Flats",
-                 "Darks", "Bias", "Integration (hours)", "Stage", "Method",
-                 "Culled", "Other Capture", "Integrate", "Edit", "Publish",
-                 "Print", "AstroBin URL", "Folder Path"]
+    s_headers = [
+        "Library",
+        "Target ID",
+        "Catalog",
+        "Name",
+        "Scope",
+        "Sensor",
+        "Session Date",
+        "Year",
+        "Lights",
+        "Rejected",
+        "Flats",
+        "Dark Flats",
+        "Darks",
+        "Bias",
+        "Integration (hours)",
+        "Stage",
+        "Method",
+        "Culled",
+        "Other Capture",
+        "Integrate",
+        "Edit",
+        "Publish",
+        "Print",
+        "AstroBin URL",
+        "Folder Path",
+    ]
     s_rows = []
     for r in cur.execute("""
         SELECT s.library_id, s.target_id, t.catalog, t.common_name, s.scope, s.sensor,
@@ -119,24 +154,41 @@ def main():
         JOIN v_session_pipeline vp ON vp.session_id = s.session_id
         ORDER BY s.session_date, s.target_id"""):
         year = int(r["session_date"][:4]) if r["session_date"] else None
-        s_rows.append([
-            r["library_id"], r["target_id"], r["catalog"], r["common_name"],
-            r["scope"], r["sensor"], r["session_date"], year, r["lights_kept"],
-            r["lights_rejected"], r["flats_count"], r["dark_flats_count"],
-            r["darks_count"], r["bias_count"], r["hrs"],
-            r["stage"], r["method"],
-            stage_text(r["stage_culled"]),
-            "Yes" if r["is_other_capture"] else "No",
-            stage_text(r["stage_integrate"]), stage_text(r["stage_edit"]),
-            stage_text(r["stage_publish"]), stage_text(r["stage_print"]),
-            r["astrobin_url"] or "", r["folder_path"],
-        ])
+        s_rows.append(
+            [
+                r["library_id"],
+                r["target_id"],
+                r["catalog"],
+                r["common_name"],
+                r["scope"],
+                r["sensor"],
+                r["session_date"],
+                year,
+                r["lights_kept"],
+                r["lights_rejected"],
+                r["flats_count"],
+                r["dark_flats_count"],
+                r["darks_count"],
+                r["bias_count"],
+                r["hrs"],
+                r["stage"],
+                r["method"],
+                stage_text(r["stage_culled"]),
+                "Yes" if r["is_other_capture"] else "No",
+                stage_text(r["stage_integrate"]),
+                stage_text(r["stage_edit"]),
+                stage_text(r["stage_publish"]),
+                stage_text(r["stage_print"]),
+                r["astrobin_url"] or "",
+                r["folder_path"],
+            ]
+        )
     write_sheet(ws, s_headers, s_rows, col_formats={8: "0", 15: "0.00"})
     n = len(s_rows)
     # totals row with SUM formulas (bounded to data rows 2..n+1)
     tr = n + 2
     ws.cell(row=tr, column=1, value="TOTAL").font = BOLD_FONT
-    for col in (9, 10, 11, 12, 13, 14, 15):   # Lights..Integration
+    for col in (9, 10, 11, 12, 13, 14, 15):  # Lights..Integration
         L = get_column_letter(col)
         c = ws.cell(row=tr, column=col, value=f"=SUM({L}2:{L}{n+1})")
         c.font = BOLD_FONT
@@ -151,11 +203,27 @@ def main():
     # columns are derived from the target's sessions (single-session
     # integrations) and its multi-session integrations.
     wt = wb.create_sheet("Targets")
-    t_headers = ["Target ID", "Catalog", "Name", "Sessions", "Lifetime Hours",
-                 "2024 Hours", "2025 Hours", "2026 Hours", "Lights", "Scopes Used",
-                 "First Session", "Last Session", "Integrations",
-                 "Sessions Published", "Integrations Published", "Furthest Stage",
-                 "AstroBin URL", "Goal Hours", "% Complete"]
+    t_headers = [
+        "Target ID",
+        "Catalog",
+        "Name",
+        "Sessions",
+        "Lifetime Hours",
+        "2024 Hours",
+        "2025 Hours",
+        "2026 Hours",
+        "Lights",
+        "Scopes Used",
+        "First Session",
+        "Last Session",
+        "Integrations",
+        "Sessions Published",
+        "Integrations Published",
+        "Furthest Stage",
+        "AstroBin URL",
+        "Goal Hours",
+        "% Complete",
+    ]
     t_rows = []
     for r in cur.execute("""
         SELECT t.target_id, t.catalog, t.common_name, t.is_other_capture,
@@ -172,22 +240,34 @@ def main():
     # Per-target rollups for the derived pipeline columns.
     def count_map(sql):
         return {row[0]: row[1] for row in cur.execute(sql)}
-    sess_pub = count_map("SELECT target_id, COUNT(*) FROM sessions "
-                         "WHERE stage_publish=2 GROUP BY target_id")
-    integ_ct = (count_map("SELECT target_id, COUNT(*) FROM integrations "
-                          "GROUP BY target_id") if has_integrations else {})
-    integ_pub = (count_map("SELECT target_id, COUNT(*) FROM integrations "
-                           "WHERE stage_publish=2 GROUP BY target_id")
-                 if has_integrations else {})
+
+    sess_pub = count_map(
+        "SELECT target_id, COUNT(*) FROM sessions " "WHERE stage_publish=2 GROUP BY target_id"
+    )
+    integ_ct = (
+        count_map("SELECT target_id, COUNT(*) FROM integrations " "GROUP BY target_id")
+        if has_integrations
+        else {}
+    )
+    integ_pub = (
+        count_map(
+            "SELECT target_id, COUNT(*) FROM integrations "
+            "WHERE stage_publish=2 GROUP BY target_id"
+        )
+        if has_integrations
+        else {}
+    )
     furthest = {}
     for tid, sn in cur.execute(
-            "SELECT target_id, MAX(CAST(substr(furthest_stage,1,1) AS INTEGER)) "
-            "FROM v_session_pipeline WHERE NOT is_other_capture GROUP BY target_id"):
+        "SELECT target_id, MAX(CAST(substr(furthest_stage,1,1) AS INTEGER)) "
+        "FROM v_session_pipeline WHERE NOT is_other_capture GROUP BY target_id"
+    ):
         furthest[tid] = sn
     if has_integrations:
         for tid, sn in cur.execute(
-                "SELECT target_id, MAX(CAST(substr(furthest_stage,1,1) AS INTEGER)) "
-                "FROM v_integration_overview GROUP BY target_id"):
+            "SELECT target_id, MAX(CAST(substr(furthest_stage,1,1) AS INTEGER)) "
+            "FROM v_integration_overview GROUP BY target_id"
+        ):
             furthest[tid] = max(furthest.get(tid, 0), sn or 0)
     # write Targets with formulas referencing Sessions
     for c, h in enumerate(t_headers, 1):
@@ -200,15 +280,18 @@ def main():
         row = i + 2
         tid = r["target_id"]
         vals = {
-            1: tid, 2: r["catalog"], 3: r["common_name"],
-            4: f'=COUNTIF(Sessions!$B:$B,$A{row})',
-            5: f'=SUMIF(Sessions!$B:$B,$A{row},Sessions!$O:$O)',
-            6: f'=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2024)',
-            7: f'=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2025)',
-            8: f'=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2026)',
-            9: f'=SUMIF(Sessions!$B:$B,$A{row},Sessions!$I:$I)',
+            1: tid,
+            2: r["catalog"],
+            3: r["common_name"],
+            4: f"=COUNTIF(Sessions!$B:$B,$A{row})",
+            5: f"=SUMIF(Sessions!$B:$B,$A{row},Sessions!$O:$O)",
+            6: f"=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2024)",
+            7: f"=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2025)",
+            8: f"=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2026)",
+            9: f"=SUMIF(Sessions!$B:$B,$A{row},Sessions!$I:$I)",
             10: r["scopes"] or "",
-            11: r["first_s"] or "", 12: r["last_s"] or "",
+            11: r["first_s"] or "",
+            12: r["last_s"] or "",
             13: integ_ct.get(tid, 0),
             14: sess_pub.get(tid, 0),
             15: integ_pub.get(tid, 0),
@@ -230,7 +313,7 @@ def main():
     wt.freeze_panes = "A2"
     for c in range(1, len(t_headers) + 1):
         letter = get_column_letter(c)
-        longest = len(t_headers[c-1])
+        longest = len(t_headers[c - 1])
         for row in range(2, len(t_rows) + 2):
             v = wt.cell(row=row, column=c).value
             if v and not str(v).startswith("="):
@@ -239,24 +322,48 @@ def main():
 
     # ------------------------------------------------------------ Calibration
     wc = wb.create_sheet("Calibration")
-    c_headers = ["Class", "Camera", "Scope", "Temperature (°C)", "Gain", "Exposure (s)",
-                 "Raw Sets", "Raw Frames", "Master Date", "Status", "Below Threshold"]
+    c_headers = [
+        "Class",
+        "Camera",
+        "Scope",
+        "Temperature (°C)",
+        "Gain",
+        "Exposure (s)",
+        "Raw Sets",
+        "Raw Frames",
+        "Master Date",
+        "Status",
+        "Below Threshold",
+    ]
     c_rows = []
     for r in cur.execute("""
         SELECT class, camera, scope, temperature_c, gain, exp_s,
                raw_sets, raw_frames, master_date, status, below_threshold
         FROM v_calibration_needs
         ORDER BY class, camera, scope, temperature_c, gain, exp_s"""):
-        c_rows.append([
-            r["class"], r["camera"] or "", r["scope"] or "", r["temperature_c"],
-            r["gain"], r["exp_s"], r["raw_sets"], r["raw_frames"],
-            r["master_date"] or "", r["status"],
-            "Yes" if r["below_threshold"] else "",
-        ])
+        c_rows.append(
+            [
+                r["class"],
+                r["camera"] or "",
+                r["scope"] or "",
+                r["temperature_c"],
+                r["gain"],
+                r["exp_s"],
+                r["raw_sets"],
+                r["raw_frames"],
+                r["master_date"] or "",
+                r["status"],
+                "Yes" if r["below_threshold"] else "",
+            ]
+        )
     write_sheet(wc, c_headers, c_rows)
     # colour the Status column
-    status_colors = {"no master": "FCE5CD", "stale (new raw)": "FFF2CC",
-                     "stale (age)": "FFF2CC", "ok": "D9EAD3"}
+    status_colors = {
+        "no master": "FCE5CD",
+        "stale (new raw)": "FFF2CC",
+        "stale (age)": "FFF2CC",
+        "ok": "D9EAD3",
+    }
     for r in range(2, len(c_rows) + 2):
         st = wc.cell(row=r, column=10).value
         if st in status_colors:
@@ -266,22 +373,52 @@ def main():
     # v_light_calibration_coverage: per (camera, gain, exposure) combo the
     # kept lights use, is matching dark/bias data on hand (see schema.sql).
     wl = wb.create_sheet("Light Coverage")
-    l_headers = ["Camera", "Gain", "Exposure (s)", "Light Subs", "Hours",
-                 "Temperature Min", "Temperature Max", "Subs Dark-Mastered", "Subs Dark-Raw",
-                 "Subs No Dark", "Dark Status", "Bias Status",
-                 "Dark Low Frames", "Bias Low Frames"]
-    l_rows = [[r["camera"], r["gain"], r["exp_s"], r["light_subs"], r["hours"],
-               r["temp_min"], r["temp_max"], r["subs_dark_master"],
-               r["subs_dark_raw"], r["subs_dark_none"],
-               r["dark_status"], r["bias_status"],
-               "Yes" if r["dark_low"] else "", "Yes" if r["bias_low"] else ""]
-              for r in cur.execute("""
+    l_headers = [
+        "Camera",
+        "Gain",
+        "Exposure (s)",
+        "Light Subs",
+        "Hours",
+        "Temperature Min",
+        "Temperature Max",
+        "Subs Dark-Mastered",
+        "Subs Dark-Raw",
+        "Subs No Dark",
+        "Dark Status",
+        "Bias Status",
+        "Dark Low Frames",
+        "Bias Low Frames",
+    ]
+    l_rows = [
+        [
+            r["camera"],
+            r["gain"],
+            r["exp_s"],
+            r["light_subs"],
+            r["hours"],
+            r["temp_min"],
+            r["temp_max"],
+            r["subs_dark_master"],
+            r["subs_dark_raw"],
+            r["subs_dark_none"],
+            r["dark_status"],
+            r["bias_status"],
+            "Yes" if r["dark_low"] else "",
+            "Yes" if r["bias_low"] else "",
+        ]
+        for r in cur.execute("""
                   SELECT * FROM v_light_calibration_coverage
-                  ORDER BY camera, gain, exp_s""")]
+                  ORDER BY camera, gain, exp_s""")
+    ]
     write_sheet(wl, l_headers, l_rows, col_formats={5: "0"})
-    cov_colors = {"to shoot": "FCE5CD", "to build": "FFF2CC",
-                  "stale (new raw)": "FFF2CC", "stale (age)": "FFF2CC",
-                  "ok": "D9EAD3", "n/a": "EFEFEF"}
+    cov_colors = {
+        "to shoot": "FCE5CD",
+        "to build": "FFF2CC",
+        "stale (new raw)": "FFF2CC",
+        "stale (age)": "FFF2CC",
+        "ok": "D9EAD3",
+        "n/a": "EFEFEF",
+    }
     for r in range(2, len(l_rows) + 2):
         for col in (11, 12):
             st = wl.cell(row=r, column=col).value
@@ -291,11 +428,19 @@ def main():
     # ----------------------------------------------------------- QC candidates
     wq = wb.create_sheet("QC Candidates")
     q_headers = ["Target", "Session Date", "Captured (UTC)", "HFR", "RMS arcsec", "File"]
-    q_rows = [[r["target_id"], r["session_date"], r["captured_at_utc"],
-               r["hfr"], r["rms_arcsec"], r["file_path"]]
-              for r in cur.execute("SELECT * FROM v_qc_candidates")]
+    q_rows = [
+        [
+            r["target_id"],
+            r["session_date"],
+            r["captured_at_utc"],
+            r["hfr"],
+            r["rms_arcsec"],
+            r["file_path"],
+        ]
+        for r in cur.execute("SELECT * FROM v_qc_candidates")
+    ]
     if not q_rows:
-        q_rows = [["(none — no NINA v2 frames exceed HFR>3 / RMS>1.5\" yet)", "", "", "", "", ""]]
+        q_rows = [['(none — no NINA v2 frames exceed HFR>3 / RMS>1.5" yet)', "", "", "", "", ""]]
     write_sheet(wq, q_headers, q_rows, col_formats={4: "0.00", 5: "0.00"})
 
     # ---------------------------------------------------------- Integrations
@@ -310,25 +455,56 @@ def main():
                    data_through, COALESCE(integration_method, '') AS method,
                    is_stale, furthest_stage
             FROM v_integration_overview ORDER BY target_id, folder_name"""):
-            pct = (round(100.0 * r["available_hours"] / r["goal_hours"])
-                   if r["goal_hours"] else None)
-            state = ("Stale (+%d)" % (r["sessions_available"] - r["sessions_built"])
-                     if r["is_stale"] else "Current")
-            i_rows.append([r["target_id"], r["kind"],
-                           r["rig"], r["span"],
-                           r["built_hours"], r["available_hours"], r["goal_hours"],
-                           pct, r["sessions_built"], r["sessions_available"],
-                           r["data_through"], r["method"], state,
-                           r["furthest_stage"], r["folder_name"]])
+            pct = round(100.0 * r["available_hours"] / r["goal_hours"]) if r["goal_hours"] else None
+            state = (
+                "Stale (+%d)" % (r["sessions_available"] - r["sessions_built"])
+                if r["is_stale"]
+                else "Current"
+            )
+            i_rows.append(
+                [
+                    r["target_id"],
+                    r["kind"],
+                    r["rig"],
+                    r["span"],
+                    r["built_hours"],
+                    r["available_hours"],
+                    r["goal_hours"],
+                    pct,
+                    r["sessions_built"],
+                    r["sessions_available"],
+                    r["data_through"],
+                    r["method"],
+                    state,
+                    r["furthest_stage"],
+                    r["folder_name"],
+                ]
+            )
     n_integ = len(i_rows)
     wi = wb.create_sheet("Integrations")
-    i_headers = ["Target", "Kind", "Rig", "Span", "Built (hours)", "Available (hours)",
-                 "Goal (hours)", "Progress %", "Sessions Built", "Sessions Available",
-                 "Data Through", "Method", "State", "Stage", "Folder"]
-    write_sheet(wi, i_headers,
-                i_rows or [["(no multi-session integrations yet)"] + [""] * 14],
-                col_formats={5: "0.00", 6: "0.00", 7: "0.00", 8: "0",
-                             9: "0", 10: "0"})
+    i_headers = [
+        "Target",
+        "Kind",
+        "Rig",
+        "Span",
+        "Built (hours)",
+        "Available (hours)",
+        "Goal (hours)",
+        "Progress %",
+        "Sessions Built",
+        "Sessions Available",
+        "Data Through",
+        "Method",
+        "State",
+        "Stage",
+        "Folder",
+    ]
+    write_sheet(
+        wi,
+        i_headers,
+        i_rows or [["(no multi-session integrations yet)"] + [""] * 14],
+        col_formats={5: "0.00", 6: "0.00", 7: "0.00", 8: "0", 9: "0", 10: "0"},
+    )
 
     # ----------------------------------------------------------- Data Health
     v_rows = []
@@ -340,18 +516,19 @@ def main():
             LEFT JOIN sessions s ON s.session_id = vf.session_id
             ORDER BY CASE vf.severity WHEN 'error' THEN 0
                      WHEN 'warning' THEN 1 ELSE 2 END, vf.code"""):
-            v_rows.append([r["severity"], r["code"], r["scope"],
-                           r["location"], r["message"]])
+            v_rows.append([r["severity"], r["code"], r["scope"], r["location"], r["message"]])
     n_findings = sum(1 for r in v_rows if r[0] in ("error", "warning"))
     wv = wb.create_sheet("Data Health")
-    write_sheet(wv, ["Severity", "Code", "Scope", "Location", "Detail"],
-                v_rows or [["(no validation findings)", "", "", "", ""]])
+    write_sheet(
+        wv,
+        ["Severity", "Code", "Scope", "Location", "Detail"],
+        v_rows or [["(no validation findings)", "", "", "", ""]],
+    )
     sev_colors = {"error": "F4CCCC", "warning": "FCE5CD", "info": "D9EAD3"}
     for r in range(2, len(v_rows) + 2):
         sv = wv.cell(row=r, column=1).value
         if sv in sev_colors:
-            wv.cell(row=r, column=1).fill = PatternFill(
-                "solid", start_color=sev_colors[sv])
+            wv.cell(row=r, column=1).fill = PatternFill("solid", start_color=sev_colors[sv])
 
     # --------------------------------------------------------------- Summary
     wsum = wb.create_sheet("Summary", 0)
@@ -360,16 +537,23 @@ def main():
     wsum["A2"] = f"Generated {datetime.datetime.now():%Y-%m-%d %H:%M} from tracker.db"
     wsum["A2"].font = Font(name=FONT, italic=True, size=9, color="888888")
     metrics = [
-        ("Deep-sky integration (hours)", f'=SUMIFS(Sessions!$O$2:$O${n+1},Sessions!$S$2:$S${n+1},"No")', "0"),
-        ("Deep-sky sessions",            f'=COUNTIF(Sessions!$S$2:$S${n+1},"No")', "0"),
-        ("Other-capture sessions",       f'=COUNTIF(Sessions!$S$2:$S${n+1},"Yes")', "0"),
-        ("Kept light frames",            f'=SUM(Sessions!$I$2:$I${n+1})', "#,##0"),
-        ("Rejected light frames",        f'=SUM(Sessions!$J$2:$J${n+1})', "#,##0"),
-        ("Distinct targets",             f'=COUNTA(Targets!$A$2:$A${len(t_rows)+1})', "0"),
-        ("Calibration sets tracked",     f'=COUNTA(Calibration!$A$2:$A${len(c_rows)+1})', "0"),
-        ("Calibration items needing attention",
-                                         '=COUNTIF(Calibration!$J:$J,"no master")+COUNTIF(Calibration!$J:$J,"stale (new raw)")+COUNTIF(Calibration!$J:$J,"stale (age)")', "0"),
-        ("Multi-session integrations",   n_integ, "0"),
+        (
+            "Deep-sky integration (hours)",
+            f'=SUMIFS(Sessions!$O$2:$O${n+1},Sessions!$S$2:$S${n+1},"No")',
+            "0",
+        ),
+        ("Deep-sky sessions", f'=COUNTIF(Sessions!$S$2:$S${n+1},"No")', "0"),
+        ("Other-capture sessions", f'=COUNTIF(Sessions!$S$2:$S${n+1},"Yes")', "0"),
+        ("Kept light frames", f"=SUM(Sessions!$I$2:$I${n+1})", "#,##0"),
+        ("Rejected light frames", f"=SUM(Sessions!$J$2:$J${n+1})", "#,##0"),
+        ("Distinct targets", f"=COUNTA(Targets!$A$2:$A${len(t_rows)+1})", "0"),
+        ("Calibration sets tracked", f"=COUNTA(Calibration!$A$2:$A${len(c_rows)+1})", "0"),
+        (
+            "Calibration items needing attention",
+            '=COUNTIF(Calibration!$J:$J,"no master")+COUNTIF(Calibration!$J:$J,"stale (new raw)")+COUNTIF(Calibration!$J:$J,"stale (age)")',
+            "0",
+        ),
+        ("Multi-session integrations", n_integ, "0"),
         ("Validation findings (error + warning)", n_findings, "0"),
     ]
     row = 4
@@ -385,15 +569,25 @@ def main():
 
     # Sheet order follows the pipeline flow (STYLE.md): summary, then
     # planning -> captured -> integrated, with calibration + health at the end.
-    sheet_order = ["Summary", "Targets", "Sessions", "Integrations",
-                   "Calibration", "Light Coverage", "QC Candidates", "Data Health"]
+    sheet_order = [
+        "Summary",
+        "Targets",
+        "Sessions",
+        "Integrations",
+        "Calibration",
+        "Light Coverage",
+        "QC Candidates",
+        "Data Health",
+    ]
     wb._sheets = [wb[t] for t in sheet_order]
 
     wb.save(args.out)
     con.close()
     print(f"Wrote {args.out}")
-    print(f"  Sessions: {n} · Targets: {len(t_rows)} · Calibration: {len(c_rows)} "
-          f"· Integrations: {n_integ} · Health findings: {len(v_rows)}")
+    print(
+        f"  Sessions: {n} · Targets: {len(t_rows)} · Calibration: {len(c_rows)} "
+        f"· Integrations: {n_integ} · Health findings: {len(v_rows)}"
+    )
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ Run natively on the Mac (needs the mounted volumes and internet):
     python3 "populate_notes.py" --only "M_81"   # limit to matching folders
     python3 "populate_notes.py" --verbose
 """
+
 from __future__ import annotations
 import argparse, datetime as dt, glob, json, math, os, re, sys, time, urllib.parse, urllib.request
 
@@ -44,15 +45,15 @@ import argparse, datetime as dt, glob, json, math, os, re, sys, time, urllib.par
 # Library paths come from config.toml (via astro_config); locations.toml is
 # found relative to the scripts. Nothing here is hardcoded to a machine.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import astro_config   # noqa: E402
+import astro_config  # noqa: E402
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
-API_PAUSE_S = 0.4          # be polite between Open-Meteo calls
+API_PAUSE_S = 0.4  # be polite between Open-Meteo calls
 SYNODIC_MONTH = 29.530588853
 
 # Fallback window (local time) for sessions with no parseable FITS timestamps.
-FALLBACK_START_H = 21      # 21:00 on the folder date
-FALLBACK_END_H = 5 + 24    # 05:00 the next morning
+FALLBACK_START_H = 21  # 21:00 on the folder date
+FALLBACK_END_H = 5 + 24  # 05:00 the next morning
 
 
 # =============================================================================
@@ -77,7 +78,7 @@ def load_locations(path):
                 continue
             if current is None:
                 continue
-            m = re.match(r'(\w+)\s*=\s*(.+?)\s*(?:#.*)?$', s)
+            m = re.match(r"(\w+)\s*=\s*(.+?)\s*(?:#.*)?$", s)
             if m:
                 key, raw = m.group(1), m.group(2).strip()
                 if raw and raw[0] in "\"'":
@@ -101,14 +102,13 @@ def load_locations(path):
 def julian_day(d: dt.datetime) -> float:
     """Julian Day for a UTC datetime."""
     y, m = d.year, d.month
-    day = (d.day + d.hour / 24 + d.minute / 1440 + d.second / 86400)
+    day = d.day + d.hour / 24 + d.minute / 1440 + d.second / 86400
     if m <= 2:
         y -= 1
         m += 12
     a = y // 100
     b = 2 - a + a // 4
-    return (math.floor(365.25 * (y + 4716)) + math.floor(30.6001 * (m + 1))
-            + day + b - 1524.5)
+    return math.floor(365.25 * (y + 4716)) + math.floor(30.6001 * (m + 1)) + day + b - 1524.5
 
 
 def moon_state(when_utc: dt.datetime):
@@ -124,15 +124,15 @@ def moon_state(when_utc: dt.datetime):
 
     rad = math.radians
     # --- Sun: ecliptic longitude ---
-    g = norm(357.529 + 0.98560028 * d)            # mean anomaly
-    q = norm(280.459 + 0.98564736 * d)            # mean longitude
+    g = norm(357.529 + 0.98560028 * d)  # mean anomaly
+    q = norm(280.459 + 0.98564736 * d)  # mean longitude
     sun_lon = norm(q + 1.915 * math.sin(rad(g)) + 0.020 * math.sin(rad(2 * g)))
 
     # --- Moon: ecliptic longitude (main periodic terms) ---
-    Lm = norm(218.316 + 13.176396 * d)            # mean longitude
-    Mm = norm(134.963 + 13.064993 * d)            # mean anomaly
-    D  = norm(297.850 + 12.190749 * d)            # mean elongation
-    F  = norm(93.272 + 13.229350 * d)             # argument of latitude
+    Lm = norm(218.316 + 13.176396 * d)  # mean longitude
+    Mm = norm(134.963 + 13.064993 * d)  # mean anomaly
+    D = norm(297.850 + 12.190749 * d)  # mean elongation
+    F = norm(93.272 + 13.229350 * d)  # argument of latitude
     moon_lon = norm(
         Lm
         + 6.289 * math.sin(rad(Mm))
@@ -143,14 +143,14 @@ def moon_state(when_utc: dt.datetime):
         - 0.114 * math.sin(rad(2 * F))
     )
 
-    elong = norm(moon_lon - sun_lon)              # 0 = new, 180 = full
-    illum = (1 - math.cos(rad(elong))) / 2.0      # illuminated fraction 0..1
+    elong = norm(moon_lon - sun_lon)  # 0 = new, 180 = full
+    illum = (1 - math.cos(rad(elong))) / 2.0  # illuminated fraction 0..1
     age = elong / 360.0 * SYNODIC_MONTH
 
     names = [
-        (1.84566,  "new moon"),
-        (5.53699,  "waxing crescent"),
-        (9.22831,  "first quarter"),
+        (1.84566, "new moon"),
+        (5.53699, "waxing crescent"),
+        (9.22831, "first quarter"),
         (12.91963, "waxing gibbous"),
         (16.61096, "full moon"),
         (20.30228, "waning gibbous"),
@@ -166,8 +166,8 @@ def moon_state(when_utc: dt.datetime):
 # Session folder + FITS filename inspection
 # =============================================================================
 DATE_IN_FOLDER = re.compile(r"(\d{4})-(\d{2})-(\d{2})\s*$")
-ASIAIR_DT = re.compile(r"_(\d{8})-(\d{6})_")               # _YYYYMMDD-HHMMSS_
-NINA_DT   = re.compile(r"_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_")
+ASIAIR_DT = re.compile(r"_(\d{8})-(\d{6})_")  # _YYYYMMDD-HHMMSS_
+NINA_DT = re.compile(r"_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_")
 EXP_IN_NAME = re.compile(r"_(\d+(?:\.\d+)?)(s|ms)_", re.I)
 
 
@@ -184,14 +184,14 @@ def frame_local_time(fname):
     m = ASIAIR_DT.search(fname)
     if m:
         d, t = m.group(1), m.group(2)
-        when = dt.datetime(int(d[:4]), int(d[4:6]), int(d[6:8]),
-                           int(t[:2]), int(t[2:4]), int(t[4:6]))
+        when = dt.datetime(
+            int(d[:4]), int(d[4:6]), int(d[6:8]), int(t[:2]), int(t[2:4]), int(t[4:6])
+        )
     else:
         m = NINA_DT.search(fname)
         if not m:
             return None, None
-        when = dt.datetime.strptime(m.group(1) + " " + m.group(2),
-                                    "%Y-%m-%d %H-%M-%S")
+        when = dt.datetime.strptime(m.group(1) + " " + m.group(2), "%Y-%m-%d %H-%M-%S")
     exp = None
     em = EXP_IN_NAME.search(fname)
     if em:
@@ -218,10 +218,10 @@ def session_window(session_dir, fdate):
       "fallback" - no parseable FITS at all; 21:00->05:00 on the folder date
 
     Only science (Light) frames define the observing window."""
-    night0 = fdate                            # evening of the folder date
-    night1 = fdate + dt.timedelta(days=1)     # into the next morning
-    on_date = []   # frames captured on the folder-date night
-    all_lt = []    # every parseable light frame in the folder
+    night0 = fdate  # evening of the folder date
+    night1 = fdate + dt.timedelta(days=1)  # into the next morning
+    on_date = []  # frames captured on the folder-date night
+    all_lt = []  # every parseable light frame in the folder
     for root, _dirs, files in os.walk(session_dir):
         for fn in files:
             if not re.search(r"(?i)\.(fit|fits|xisf)$", fn):
@@ -252,9 +252,16 @@ def session_window(session_dir, fdate):
 # =============================================================================
 # Weather: Open-Meteo historical archive
 # =============================================================================
-HOURLY_VARS = ("temperature_2m", "relative_humidity_2m", "dew_point_2m",
-               "cloud_cover", "wind_speed_10m", "surface_pressure",
-               "weather_code", "precipitation")
+HOURLY_VARS = (
+    "temperature_2m",
+    "relative_humidity_2m",
+    "dew_point_2m",
+    "cloud_cover",
+    "wind_speed_10m",
+    "surface_pressure",
+    "weather_code",
+    "precipitation",
+)
 
 
 def fetch_weather(lat, lon, start_local, end_local):
@@ -290,8 +297,9 @@ def fetch_weather(lat, lon, start_local, end_local):
     if not keep:
         # window fell between samples; take the hour nearest the midpoint
         mid = start_local + (end_local - start_local) / 2
-        best = min(range(len(stamps)),
-                   key=lambda i: abs(dt.datetime.fromisoformat(stamps[i]) - mid))
+        best = min(
+            range(len(stamps)), key=lambda i: abs(dt.datetime.fromisoformat(stamps[i]) - mid)
+        )
         keep = [best]
 
     def avg(var):
@@ -306,8 +314,7 @@ def fetch_weather(lat, lon, start_local, end_local):
     codes = [(hourly.get("weather_code") or [None])[i] for i in keep]
     codes = [c for c in codes if c is not None]
     precip_col = hourly.get("precipitation") or []
-    precip = sum(precip_col[i] for i in keep
-                 if i < len(precip_col) and precip_col[i] is not None)
+    precip = sum(precip_col[i] for i in keep if i < len(precip_col) and precip_col[i] is not None)
 
     return {
         "temperature_c": round(temp, 1),
@@ -359,8 +366,15 @@ def describe(cloud, wcode, precip_mm):
 # notes.toml editing  (section-aware, fill-blanks-only, comment-preserving)
 # =============================================================================
 SKY_FIELDS = ("moon_phase", "moon_illumination", "moon_age_days")
-WEATHER_FIELDS = ("temperature_c", "humidity_pct", "dewpoint_c",
-                  "cloud_cover_pct", "wind_kph", "pressure_hpa", "conditions")
+WEATHER_FIELDS = (
+    "temperature_c",
+    "humidity_pct",
+    "dewpoint_c",
+    "cloud_cover_pct",
+    "wind_kph",
+    "pressure_hpa",
+    "conditions",
+)
 STRING_FIELDS = {"moon_phase", "conditions"}
 
 
@@ -382,7 +396,7 @@ def apply_updates(text, section_values):
     section = None
     filled = []
     for idx, line in enumerate(lines):
-        sm = re.match(r'\s*\[(\w+)\]', line)
+        sm = re.match(r"\s*\[(\w+)\]", line)
         if sm:
             section = sm.group(1)
             continue
@@ -398,8 +412,7 @@ def apply_updates(text, section_values):
         if val is None:
             continue
         literal = toml_literal(key, val)
-        lines[idx] = (fm.group(1) + key + fm.group(3) + literal
-                      + fm.group(4) + fm.group(5))
+        lines[idx] = fm.group(1) + key + fm.group(3) + literal + fm.group(4) + fm.group(5)
         filled.append(f"{section}.{key}={literal}")
     return "".join(lines), filled
 
@@ -420,6 +433,7 @@ def safe_write(path, text):
         pass
     try:
         import tempfile
+
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
@@ -441,8 +455,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="report only, write nothing")
     ap.add_argument("--no-weather", action="store_true", help="moon only, skip the API")
     ap.add_argument("--only", default="", help="limit to session folders containing this substring")
-    ap.add_argument("--config", default=None,
-                    help="path to config.toml (default: next to this script)")
+    ap.add_argument(
+        "--config", default=None, help="path to config.toml (default: next to this script)"
+    )
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -457,14 +472,15 @@ def main():
             continue
         notes += sorted(glob.glob(os.path.join(root, "*", "*", "*notes.toml")))
     # skip anything staged for deletion or under a leading-underscore utility folder
-    notes = [n for n in notes
-             if "_to_delete" not in n and os.sep + "_organization" + os.sep not in n]
+    notes = [
+        n for n in notes if "_to_delete" not in n and os.sep + "_organization" + os.sep not in n
+    ]
     if args.only:
         notes = [n for n in notes if args.only in n]
     print(f"Found {len(notes)} session notes.toml to process\n")
 
     n_sky = n_weather = n_skipped_weather = n_loc_unknown = n_offdate = 0
-    n_have_weather = 0   # already filled — API skipped
+    n_have_weather = 0  # already filled — API skipped
     n_write_fail = 0
     write_failed = []
     weather_cache = {}  # (site, d0, d1) -> result, avoids duplicate API calls
@@ -488,25 +504,25 @@ def main():
         start, end, mid, nframes, status = session_window(session_dir, fdate)
         if status == "offdate":
             n_offdate += 1
-            print(f"  ! {session}: folder name is dated {fdate}, but its "
-                  f"{nframes} light frames were captured {start:%Y-%m-%d} "
-                  f"-> using the frames' date; folder name likely needs a fix")
+            print(
+                f"  ! {session}: folder name is dated {fdate}, but its "
+                f"{nframes} light frames were captured {start:%Y-%m-%d} "
+                f"-> using the frames' date; folder name likely needs a fix"
+            )
 
         # --- sky (offline) ---
         # convert local midpoint to UTC with a longitude-based offset estimate
         utc_offset_h = round(site["lon"] / 15.0)
         mid_utc = mid - dt.timedelta(hours=utc_offset_h)
         phase, illum, age = moon_state(mid_utc)
-        sky_vals = {"moon_phase": phase, "moon_illumination": illum,
-                    "moon_age_days": age}
+        sky_vals = {"moon_phase": phase, "moon_illumination": illum, "moon_age_days": age}
 
         # --- weather (network) ---
         # Skip the API entirely if this session's [weather] is already filled
         # (temperature_c has a value). Blank sections — including recent nights
         # the archive can't cover yet — are retried on the next run.
         weather_vals = {}
-        if not args.no_weather and re.search(
-                r'^\s*temperature_c\s*=\s*-?[\d.]+', text, re.M):
+        if not args.no_weather and re.search(r"^\s*temperature_c\s*=\s*-?[\d.]+", text, re.M):
             n_have_weather += 1
         elif not args.no_weather:
             key = (loc, start.date().isoformat(), end.date().isoformat())
@@ -525,15 +541,16 @@ def main():
                         print(f"    weather fetch failed ({session}): {e}")
                 time.sleep(API_PAUSE_S)
 
-        new_text, filled = apply_updates(
-            text, {"sky": sky_vals, "weather": weather_vals})
+        new_text, filled = apply_updates(text, {"sky": sky_vals, "weather": weather_vals})
 
         if filled and not args.dry_run:
             if not safe_write(path, new_text):
                 n_write_fail += 1
                 write_failed.append(path)
-                print(f"  ! WRITE FAILED ({session}) - skipped, re-run after "
-                      f"remounting the volume")
+                print(
+                    f"  ! WRITE FAILED ({session}) - skipped, re-run after "
+                    f"remounting the volume"
+                )
                 continue
         if any(f.startswith("sky.") for f in filled):
             n_sky += 1
@@ -541,19 +558,22 @@ def main():
             n_weather += 1
 
         tag = "DRY " if args.dry_run else ""
-        src = {"ondate": f"{nframes} frames",
-               "offdate": f"{nframes} frames (off folder date)",
-               "fallback": "no FITS (fallback window)"}[status]
+        src = {
+            "ondate": f"{nframes} frames",
+            "offdate": f"{nframes} frames (off folder date)",
+            "fallback": "no FITS (fallback window)",
+        }[status]
         if args.verbose or filled:
             print(f"  {tag}{session}")
-            print(f"      {loc} | window {start:%Y-%m-%d %H:%M}->{end:%H:%M} "
-                  f"local | {src}")
+            print(f"      {loc} | window {start:%Y-%m-%d %H:%M}->{end:%H:%M} " f"local | {src}")
             print(f"      moon: {phase}, {illum}% illum, age {age}d")
             if weather_vals:
-                print(f"      weather: {weather_vals.get('temperature_c')}C "
-                      f"{weather_vals.get('humidity_pct')}%RH "
-                      f"cloud {weather_vals.get('cloud_cover_pct')}% "
-                      f"\"{weather_vals.get('conditions')}\"")
+                print(
+                    f"      weather: {weather_vals.get('temperature_c')}C "
+                    f"{weather_vals.get('humidity_pct')}%RH "
+                    f"cloud {weather_vals.get('cloud_cover_pct')}% "
+                    f"\"{weather_vals.get('conditions')}\""
+                )
             if filled:
                 print(f"      filled: {', '.join(filled)}")
             else:
@@ -572,8 +592,10 @@ def main():
         print(f"  sessions with mis-dated folder name: {n_offdate}  (see ! lines above)")
     if n_write_fail:
         print(f"  sessions that FAILED to write      : {n_write_fail}")
-        print(f"  -> remount the volume and re-run; the script is idempotent "
-              f"and will only touch these:")
+        print(
+            f"  -> remount the volume and re-run; the script is idempotent "
+            f"and will only touch these:"
+        )
         for p in write_failed:
             print(f"       {p}")
 

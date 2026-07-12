@@ -30,6 +30,7 @@ Common named groups across all grammars: type, target (may be None or empty),
 exp, unit (s or ms; defaults to s for NINA), cam, gain, dt or date+time, rot,
 temp, filter (may be None or empty), idx, ext.
 """
+
 import re
 
 # 1) ASIAir science — target present, optional filter, optional rotation
@@ -91,8 +92,8 @@ NINA_V2 = re.compile(
     r"gain(?P<gain>-?\d+)_"
     r"(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})_"
     r"(?:(?P<filter_mid>[A-Za-z][\w ]*?)_)?"  # filter token may precede rot;
-    r"(?P<rot>-?[\d.]*)deg_"      # names like "O 3nm" contain a space.
-    r"(?P<temp>-?[\d.]+)C__"      # rot may be empty (no rotator): "..._deg_..."
+    r"(?P<rot>-?[\d.]*)deg_"  # names like "O 3nm" contain a space.
+    r"(?P<temp>-?[\d.]+)C__"  # rot may be empty (no rotator): "..._deg_..."
     r"HFR(?P<hfr>[\d.]*)_"
     r"RMS(?P<rms>[\d.]*)_"
     r"(?P<filter>[\w ]*?)_"
@@ -165,8 +166,16 @@ ASIAIR_CAL_ROTFIRST = re.compile(
     re.IGNORECASE,
 )
 
-PARSERS = (NINA_V2, NINA_LEGACY, ASIAIR_SCI_ROTFIRST, ASIAIR_CAL_ROTFIRST,
-           ASIAIR_SCI, ASIAIR_CAL, ASIAIR_DSLR_SCI, ASIAIR_DSLR_CAL)
+PARSERS = (
+    NINA_V2,
+    NINA_LEGACY,
+    ASIAIR_SCI_ROTFIRST,
+    ASIAIR_CAL_ROTFIRST,
+    ASIAIR_SCI,
+    ASIAIR_CAL,
+    ASIAIR_DSLR_SCI,
+    ASIAIR_DSLR_CAL,
+)
 
 # Deliberate captures that are not science or calibration frames: ASIAir
 # "Preview", NINA "SNAPSHOT" (framing/focus tests). parse() leaves them
@@ -222,28 +231,88 @@ if __name__ == "__main__":
     # Smoke test
     samples = [
         # ASIAir science
-        ("Light_M 81_300.0s_Bin1_2600MC_gain100_20260420-044507_-20.0C_0061.fit", "ASIAIR_SCI", "Light"),
-        ("Light_M 66_300.0s_Bin1_2600MC_gain100_20260309-035017_172deg_-19.9C_0025.fit", "ASIAIR_SCI", "Light"),
-        ("Light_NGC 3718_120.0s_Bin1_585MC_gain252_20260424-011157_74deg_-18.7C_LQuadE_0054.fit", "ASIAIR_SCI", "Light"),
-        ("Light_M 81_180.0s_Bin1_585MC_gain200_20260419-015230_74deg_-20.0C_LQuadEnhance_0066.fit", "ASIAIR_SCI", "Light"),
-        ("Light_Moon_10.0ms_Bin1_2600MC_gain-25_20260422-210144_-14.5C_0035.fit", "ASIAIR_SCI", "Light"),
+        (
+            "Light_M 81_300.0s_Bin1_2600MC_gain100_20260420-044507_-20.0C_0061.fit",
+            "ASIAIR_SCI",
+            "Light",
+        ),
+        (
+            "Light_M 66_300.0s_Bin1_2600MC_gain100_20260309-035017_172deg_-19.9C_0025.fit",
+            "ASIAIR_SCI",
+            "Light",
+        ),
+        (
+            "Light_NGC 3718_120.0s_Bin1_585MC_gain252_20260424-011157_74deg_-18.7C_LQuadE_0054.fit",
+            "ASIAIR_SCI",
+            "Light",
+        ),
+        (
+            "Light_M 81_180.0s_Bin1_585MC_gain200_20260419-015230_74deg_-20.0C_LQuadEnhance_0066.fit",
+            "ASIAIR_SCI",
+            "Light",
+        ),
+        (
+            "Light_Moon_10.0ms_Bin1_2600MC_gain-25_20260422-210144_-14.5C_0035.fit",
+            "ASIAIR_SCI",
+            "Light",
+        ),
         # ASIAir calibration
-        ("Flat_108.3ms_Bin1_585MC_gain200_20260309-084517_156deg_-19.5C_0008.fit", "ASIAIR_CAL", "Flat"),
+        (
+            "Flat_108.3ms_Bin1_585MC_gain200_20260309-084517_156deg_-19.5C_0008.fit",
+            "ASIAIR_CAL",
+            "Flat",
+        ),
         ("Dark_300.0s_Bin1_2600MC_gain100_20260420-080000_-20.0C_0010.fit", "ASIAIR_CAL", "Dark"),
         # NINA legacy
-        ("LIGHT_M 106_300.00s_1x1_Poseidon-C PRO_125_2026-05-12_23-13-37_288.99_-20.10__0003.fits", "NINA_LEGACY", "LIGHT"),
-        ("LIGHT_NGC 4406_120.00s_1x1_Poseidon-C PRO_125_2026-05-14_22-08-12_45.50_-20.00__0001.fits", "NINA_LEGACY", "LIGHT"),
+        (
+            "LIGHT_M 106_300.00s_1x1_Poseidon-C PRO_125_2026-05-12_23-13-37_288.99_-20.10__0003.fits",
+            "NINA_LEGACY",
+            "LIGHT",
+        ),
+        (
+            "LIGHT_NGC 4406_120.00s_1x1_Poseidon-C PRO_125_2026-05-14_22-08-12_45.50_-20.00__0001.fits",
+            "NINA_LEGACY",
+            "LIGHT",
+        ),
         # NINA v2 — Steve's new pattern
-        ("LIGHT_M 106_300.00s_Bin1x1_Poseidon-C PRO_gain125_2026-05-12_22-56-19_288.99deg_-20.00C__HFR2.83_RMS0.42_LQuadE_0001.fits", "NINA_V2", "LIGHT"),
-        ("LIGHT_M 106_300.00s_Bin1x1_Poseidon-C PRO_gain125_2026-05-12_22-56-19_288.99deg_-20.00C__HFR_RMS__0002.fits", "NINA_V2", "LIGHT"),  # empty HFR/RMS/filter
-        ("FLAT__1.20s_Bin1x1_Poseidon-C PRO_gain125_2026-05-12_18-00-00_288.99deg_-20.00C__HFR_RMS_LQuadE_0001.fits", "NINA_V2", "FLAT"),    # flat, no target
+        (
+            "LIGHT_M 106_300.00s_Bin1x1_Poseidon-C PRO_gain125_2026-05-12_22-56-19_288.99deg_-20.00C__HFR2.83_RMS0.42_LQuadE_0001.fits",
+            "NINA_V2",
+            "LIGHT",
+        ),
+        (
+            "LIGHT_M 106_300.00s_Bin1x1_Poseidon-C PRO_gain125_2026-05-12_22-56-19_288.99deg_-20.00C__HFR_RMS__0002.fits",
+            "NINA_V2",
+            "LIGHT",
+        ),  # empty HFR/RMS/filter
+        (
+            "FLAT__1.20s_Bin1x1_Poseidon-C PRO_gain125_2026-05-12_18-00-00_288.99deg_-20.00C__HFR_RMS_LQuadE_0001.fits",
+            "NINA_V2",
+            "FLAT",
+        ),  # flat, no target
         # ASIAir DSLR
-        ("Light_M51_300.0s_Bin1_ISO1600_20240605-221706_38.0C_R5_0001.fit", "ASIAIR_DSLR_SCI", "Light"),
-        ("Light_M44_300.0s_Bin1_ISO1600_20240517-222003_31.0C_First_setup_0001.fit", "ASIAIR_DSLR_SCI", "Light"),  # underscored cam token
-        ("Flat_41.7ms_Bin1_ISO1600_20240605-070350_35.0C_First_setup_0001.fit", "ASIAIR_DSLR_CAL", "Flat"),
+        (
+            "Light_M51_300.0s_Bin1_ISO1600_20240605-221706_38.0C_R5_0001.fit",
+            "ASIAIR_DSLR_SCI",
+            "Light",
+        ),
+        (
+            "Light_M44_300.0s_Bin1_ISO1600_20240517-222003_31.0C_First_setup_0001.fit",
+            "ASIAIR_DSLR_SCI",
+            "Light",
+        ),  # underscored cam token
+        (
+            "Flat_41.7ms_Bin1_ISO1600_20240605-070350_35.0C_First_setup_0001.fit",
+            "ASIAIR_DSLR_CAL",
+            "Flat",
+        ),
         # Should NOT parse
         ("Preview_M 81_5.0s_Bin2_2600MC_gain0_20260419-221114_-20.1C.fit", "FAIL", None),
-        ("Light_IC 342_300.0s_Bin1_585MC_gain200_20260331-015432_158deg_-19.8C_0011_c_d.xisf", "FAIL", None),  # PI Process debayered
+        (
+            "Light_IC 342_300.0s_Bin1_585MC_gain200_20260331-015432_158deg_-19.8C_0011_c_d.xisf",
+            "FAIL",
+            None,
+        ),  # PI Process debayered
     ]
     width = max(len(s[0]) for s in samples) + 2
     print(f"{'Filename':{width}s}  Result")
@@ -251,7 +320,9 @@ if __name__ == "__main__":
     for fn, expected_grammar, expected_type in samples:
         m = parse(fn)
         if m is None:
-            verdict = "FAIL (no match)" if expected_grammar != "FAIL" else "FAIL (correctly rejected)"
+            verdict = (
+                "FAIL (no match)" if expected_grammar != "FAIL" else "FAIL (correctly rejected)"
+            )
         else:
             ftype = m.group("type")
             verdict = f"{ftype:5s} exp={m.group('exp')}s filter={safe(m,'filter','-')}"

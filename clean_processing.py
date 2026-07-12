@@ -20,6 +20,7 @@ Run natively on the Mac:
     python3 "clean_processing.py" --promote --apply   # copy master→Results, then empty
     python3 "clean_processing.py" --only "M_81"   # limit to matching folders
 """
+
 from __future__ import annotations
 import argparse, os, shutil, sys
 
@@ -28,10 +29,10 @@ import argparse, os, shutil, sys
 # =============================================================================
 # Library paths come from config.toml (via astro_config) — not hardcoded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import astro_config   # noqa: E402
-from promote_masters import find_keepers, results_dir_for   # noqa: E402
+import astro_config  # noqa: E402
+from promote_masters import find_keepers, results_dir_for  # noqa: E402
 
-WORKING_FOLDERS = ("PI Process", "PI Magic")   # folders whose contents get cleared
+WORKING_FOLDERS = ("PI Process", "PI Magic")  # folders whose contents get cleared
 SKIP_TOPLEVEL = {"_organization", "_Calibration Library", "_sessions to organize"}
 
 
@@ -72,8 +73,7 @@ def unpromoted_keepers(container):
     """
     rdir = results_dir_for(container)
     present = set(os.listdir(rdir)) if os.path.isdir(rdir) else set()
-    return [m for m in find_keepers(container)
-            if os.path.basename(m) not in present]
+    return [m for m in find_keepers(container) if os.path.basename(m) not in present]
 
 
 def report_prunable_integrations():
@@ -81,6 +81,7 @@ def report_prunable_integrations():
     Older versions are prune candidates once the latest is confirmed good.
     Read-only — reads tracker.db (next to this script); silent if absent."""
     import sqlite3
+
     db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker.db")
     if not os.path.exists(db):
         return
@@ -88,17 +89,20 @@ def report_prunable_integrations():
     try:
         rows = con.execute(
             "SELECT target_id, scope, sensor, span, version_count, "
-            "latest_version, folders FROM v_integration_prune").fetchall()
+            "latest_version, folders FROM v_integration_prune"
+        ).fetchall()
     except sqlite3.OperationalError:
         con.close()
-        return                      # older DB without the view
+        return  # older DB without the view
     con.close()
     print()
     if not rows:
         print("Prunable multi-session integrations: none.")
         return
-    print(f"Prunable multi-session integrations — {len(rows)} lineage(s) with "
-          f"multiple versions (keep the latest, the rest can be cleaned up):")
+    print(
+        f"Prunable multi-session integrations — {len(rows)} lineage(s) with "
+        f"multiple versions (keep the latest, the rest can be cleaned up):"
+    )
     for tid, scope, sensor, span, vcount, latest, folders in rows:
         rig = f"{scope} {sensor}" if scope else "composite"
         print(f"  {tid} · {rig} · {span}: {vcount} versions, latest v{latest}")
@@ -124,24 +128,27 @@ def empty_folder(path):
 # Main
 # =============================================================================
 def main():
-    ap = argparse.ArgumentParser(
-        description="Empty the PI Process / PI Magic working folders.")
-    ap.add_argument("--apply", action="store_true",
-                    help="actually delete (default is a preview only)")
-    ap.add_argument("--only", default="",
-                    help="limit to session folders containing this substring")
-    ap.add_argument("--promote", action="store_true",
-                    help="copy any master not yet in Results into Results first, "
-                         "instead of skipping that folder")
-    ap.add_argument("--config", default=None,
-                    help="path to config.toml (default: next to this script)")
+    ap = argparse.ArgumentParser(description="Empty the PI Process / PI Magic working folders.")
+    ap.add_argument(
+        "--apply", action="store_true", help="actually delete (default is a preview only)"
+    )
+    ap.add_argument("--only", default="", help="limit to session folders containing this substring")
+    ap.add_argument(
+        "--promote",
+        action="store_true",
+        help="copy any master not yet in Results into Results first, "
+        "instead of skipping that folder",
+    )
+    ap.add_argument(
+        "--config", default=None, help="path to config.toml (default: next to this script)"
+    )
     args = ap.parse_args()
 
     libraries = astro_config.load_libraries(args.config)
     lib_paths = [L["path"] for L in libraries]
-    targets = []      # (working_folder_path, file_count, bytes)
-    skipped = []      # (working_folder_path, a master still only in working)
-    promoted = []     # (master_src, results_dir) copied to Results first
+    targets = []  # (working_folder_path, file_count, bytes)
+    skipped = []  # (working_folder_path, a master still only in working)
+    promoted = []  # (master_src, results_dir) copied to Results first
 
     for lib in libraries:
         libroot = lib["path"]
@@ -150,8 +157,7 @@ def main():
             continue
         for tname in sorted(os.listdir(libroot)):
             tpath = os.path.join(libroot, tname)
-            if tname.startswith((".", "_")) or tname in SKIP_TOPLEVEL \
-                    or not os.path.isdir(tpath):
+            if tname.startswith((".", "_")) or tname in SKIP_TOPLEVEL or not os.path.isdir(tpath):
                 continue
             # Processing folders live in both session folders and the
             # integration folders under {target}/integrations/.
@@ -194,7 +200,7 @@ def main():
                         continue
                     fc, sz = tree_size(wpath)
                     if fc == 0:
-                        continue                      # already empty
+                        continue  # already empty
                     targets.append((wpath, fc, sz))
 
     # ---- report ----
@@ -202,13 +208,15 @@ def main():
     total_bytes = sum(t[2] for t in targets)
     mode = "APPLY" if args.apply else "DRY RUN"
     print(f"clean_processing.py — {mode}")
-    print(f"Working folders to empty: {len(targets)}  "
-          f"({total_files} files, {human(total_bytes)})\n")
+    print(
+        f"Working folders to empty: {len(targets)}  "
+        f"({total_files} files, {human(total_bytes)})\n"
+    )
     for wpath, fc, sz in targets:
         rel = wpath
         for lp in lib_paths:
             if wpath.startswith(lp):
-                rel = wpath[len(lp) + 1:]
+                rel = wpath[len(lp) + 1 :]
         print(f"  {fc:5} files  {human(sz):>9}   {rel}")
 
     if promoted:
@@ -218,8 +226,10 @@ def main():
             print(f"    {os.path.basename(src)}  →  {rdir}")
 
     if skipped:
-        print(f"\n  SKIPPED — a keeper (master or .psd) is not in Results yet "
-              f"(run promote_masters.py, or re-run with --promote):")
+        print(
+            f"\n  SKIPPED — a keeper (master or .psd) is not in Results yet "
+            f"(run promote_masters.py, or re-run with --promote):"
+        )
         for wpath, keeper in skipped:
             print(f"    {wpath}")
             print(f"      keeper still only in working: {os.path.basename(keeper)}")
@@ -229,8 +239,10 @@ def main():
 
     # ---- act ----
     if not args.apply:
-        print(f"\nDRY RUN — nothing deleted. Re-run with --apply to empty "
-              f"{len(targets)} folder(s).")
+        print(
+            f"\nDRY RUN — nothing deleted. Re-run with --apply to empty "
+            f"{len(targets)} folder(s)."
+        )
         return
 
     print()
@@ -241,8 +253,10 @@ def main():
             removed_folders += 1
         except OSError as e:
             print(f"  ! could not empty {wpath}: {e}")
-    print(f"Done — emptied {removed_folders} folder(s), "
-          f"removed {removed_files} files, reclaimed {human(total_bytes)}.")
+    print(
+        f"Done — emptied {removed_folders} folder(s), "
+        f"removed {removed_files} files, reclaimed {human(total_bytes)}."
+    )
     if promoted:
         print(f"Promoted {len(promoted)} keeper(s) to Results first.")
     if skipped:

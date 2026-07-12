@@ -29,6 +29,7 @@ Usage:
     python3 preflight.py --apply          # file the OK sessions
     python3 preflight.py --apply --force  # ...including the WARN ones
 """
+
 import argparse
 import datetime as dt
 import os
@@ -68,8 +69,11 @@ def registry_names(subfolder: str) -> set[str]:
     path = astro_config.org_path(subfolder)
     if not os.path.isdir(path):
         return set()
-    return {d for d in os.listdir(path)
-            if not d.startswith((".", "!")) and os.path.isdir(os.path.join(path, d))}
+    return {
+        d
+        for d in os.listdir(path)
+        if not d.startswith((".", "!")) and os.path.isdir(os.path.join(path, d))
+    }
 
 
 def library_target_map(library_root: str) -> dict[str, str]:
@@ -90,10 +94,16 @@ def library_target_map(library_root: str) -> dict[str, str]:
     return out
 
 
-def check_session(spath: str, sname: str, targets: dict[str, str],
-                  reg_targets: dict[str, str],
-                  scopes: set[str], sensors: set[str], combos: set[str],
-                  library_root: str) -> tuple[list[str], list[str], list[str], str | None]:
+def check_session(
+    spath: str,
+    sname: str,
+    targets: dict[str, str],
+    reg_targets: dict[str, str],
+    scopes: set[str],
+    sensors: set[str],
+    combos: set[str],
+    library_root: str,
+) -> tuple[list[str], list[str], list[str], str | None]:
     """Run every pre-flight check against one staged session folder.
 
     Args:
@@ -120,8 +130,12 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
         errors.append("name does not parse as `<Target_id> <Scope> <Sensor> <YYYY-MM-DD>`")
         return errors, warnings, infos, dest
 
-    target_tok, scope, sensor, sdate = (m.group("target"), m.group("scope"),
-                                        m.group("sensor"), m.group("date"))
+    target_tok, scope, sensor, sdate = (
+        m.group("target"),
+        m.group("scope"),
+        m.group("sensor"),
+        m.group("date"),
+    )
     try:
         session_date = dt.date.fromisoformat(sdate)
     except ValueError:
@@ -134,7 +148,7 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
     # otherwise the registry names the folder to create at filing time.
     lookup_tok = target_tok
     if target_tok.lower().endswith(ADJACENT_SUFFIX):
-        lookup_tok = target_tok[:-len(ADJACENT_SUFFIX)]
+        lookup_tok = target_tok[: -len(ADJACENT_SUFFIX)]
     suffix_note = " (adjacent-field session -> base target)" if lookup_tok != target_tok else ""
     tfolder = targets.get(lookup_tok)
     if tfolder is not None:
@@ -146,8 +160,10 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
         dest = reg_targets[lookup_tok]
         infos.append(f"destination: {dest}/ (created from the registry){suffix_note}")
     else:
-        errors.append(f"target token {lookup_tok!r} matches neither a library "
-                      f"target folder nor a registry entry")
+        errors.append(
+            f"target token {lookup_tok!r} matches neither a library "
+            f"target folder nor a registry entry"
+        )
 
     # -- registry vocabularies ----------------------------------------------
     if scope not in scopes:
@@ -198,15 +214,18 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
     if kinds.get("light", 0) == 0:
         warnings.append("no light frames found")
     else:
-        infos.append(f"frames: {dict(kinds)} | rejected: {rejected} | "
-                     f"kept integration: {light_secs / 3600:.2f} h")
+        infos.append(
+            f"frames: {dict(kinds)} | rejected: {rejected} | "
+            f"kept integration: {light_secs / 3600:.2f} h"
+        )
 
     for ft, n in frame_targets.items():
         if ft.replace(" ", "_") != target_tok:
             warnings.append(f"{n} light frame(s) name target {ft!r} ≠ folder target {target_tok!r}")
     if date_skew:
-        warnings.append(f"frame dates >±{MAX_FRAME_DATE_SKEW_DAYS}d from session date: "
-                        f"{dict(date_skew)}")
+        warnings.append(
+            f"frame dates >±{MAX_FRAME_DATE_SKEW_DAYS}d from session date: " f"{dict(date_skew)}"
+        )
     if ms_lights:
         infos.append(f"{ms_lights} ms-unit light(s) — excluded from integration totals")
     if unparsed:
@@ -218,23 +237,34 @@ def check_session(spath: str, sname: str, targets: dict[str, str],
 def main() -> None:
     """Parse arguments, run pre-flight over the staging folder, print a report."""
     libs = astro_config.load_libraries()
-    working = next((l for l in libs if l["role"] == "working" and os.path.isdir(l["path"])),
-                   None)
+    working = next((l for l in libs if l["role"] == "working" and os.path.isdir(l["path"])), None)
     default_library = working["path"] if working else None
-    default_staging = (os.path.join(default_library, STAGING_DIRNAME)
-                       if default_library else None)
+    default_staging = os.path.join(default_library, STAGING_DIRNAME) if default_library else None
 
-    ap = argparse.ArgumentParser(description="Validate staged sessions before moving "
-                                             "them into a capture library.")
-    ap.add_argument("--staging", default=default_staging,
-                    help=f"staged-sessions folder (default: <working library>/{STAGING_DIRNAME})")
-    ap.add_argument("--library", default=default_library,
-                    help="destination library root (default: the working library)")
-    ap.add_argument("--apply", action="store_true",
-                    help="file the passing sessions into the library (creates "
-                         "the target folder from the registry when missing)")
-    ap.add_argument("--force", action="store_true",
-                    help="with --apply: also file sessions that only have warnings")
+    ap = argparse.ArgumentParser(
+        description="Validate staged sessions before moving " "them into a capture library."
+    )
+    ap.add_argument(
+        "--staging",
+        default=default_staging,
+        help=f"staged-sessions folder (default: <working library>/{STAGING_DIRNAME})",
+    )
+    ap.add_argument(
+        "--library",
+        default=default_library,
+        help="destination library root (default: the working library)",
+    )
+    ap.add_argument(
+        "--apply",
+        action="store_true",
+        help="file the passing sessions into the library (creates "
+        "the target folder from the registry when missing)",
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="with --apply: also file sessions that only have warnings",
+    )
     args = ap.parse_args()
 
     if not args.staging or not os.path.isdir(args.staging):
@@ -243,26 +273,31 @@ def main() -> None:
         sys.exit(f"Destination library not found: {args.library}")
 
     targets = library_target_map(args.library)
-    reg_targets = {parse_target_folder(name)["target_id"]: name
-                   for name in registry_names("target folders")}
+    reg_targets = {
+        parse_target_folder(name)["target_id"]: name for name in registry_names("target folders")
+    }
     scopes = registry_names("scope_values")
     sensors = registry_names("sensor_values")
     combos = registry_names("scope+sensor_values")
 
     print(f"Pre-flight: {args.staging}")
     print(f"Library   : {args.library}")
-    print(f"Registry  : {len(scopes)} scopes, {len(sensors)} sensors, {len(combos)} combos, "
-          f"{len(targets)} library targets\n")
+    print(
+        f"Registry  : {len(scopes)} scopes, {len(sensors)} sensors, {len(combos)} combos, "
+        f"{len(targets)} library targets\n"
+    )
 
     n_err = n_warn = n_filed = 0
-    entries = sorted(d for d in os.listdir(args.staging)
-                     if not d.startswith(".")
-                     and os.path.isdir(os.path.join(args.staging, d)))
+    entries = sorted(
+        d
+        for d in os.listdir(args.staging)
+        if not d.startswith(".") and os.path.isdir(os.path.join(args.staging, d))
+    )
     for sname in entries:
         spath = os.path.join(args.staging, sname)
         errors, warnings, infos, dest = check_session(
-            spath, sname, targets, reg_targets,
-            scopes, sensors, combos, args.library)
+            spath, sname, targets, reg_targets, scopes, sensors, combos, args.library
+        )
         verdict = "FAIL" if errors else ("WARN" if warnings else "OK")
         print(f"[{verdict}] {sname}")
         for e in errors:

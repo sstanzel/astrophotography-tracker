@@ -20,13 +20,14 @@ left untouched. Preview by default; pass --apply to write.
 For a pinned integration the snapshot is the pinned member list; adjust by hand
 if you deliberately stacked a different subset.
 """
+
 import argparse
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ingest   # noqa: E402  (read_integration_toml, resolve_auto_members, SESSION_RE)
+import ingest  # noqa: E402  (read_integration_toml, resolve_auto_members, SESSION_RE)
 
 
 def resolve_available(integration_dir, man):
@@ -49,7 +50,7 @@ def resolve_available(integration_dir, man):
 def set_array(text, key, items):
     """Replace `key = [ ... ]` with a formatted list. Returns (text, replaced?)."""
     block = f"{key} = [\n" + "".join(f'  "{it}",\n' for it in items) + "]"
-    new, n = re.subn(r'(?ms)^' + key + r'\s*=\s*\[.*?\]', lambda _m: block, text)
+    new, n = re.subn(r"(?ms)^" + key + r"\s*=\s*\[.*?\]", lambda _m: block, text)
     return new, n > 0
 
 
@@ -75,12 +76,13 @@ def apply_built(text, sessions):
 def main():
     """Parse arguments and snapshot the built sessions into the manifest."""
     ap = argparse.ArgumentParser(
-        description="Record the sessions stacked into an integration's master.")
+        description="Record the sessions stacked into an integration's master."
+    )
     ap.add_argument("integration_dir", help="path to the integration folder")
-    ap.add_argument("--clear", action="store_true",
-                    help="empty [built] (mark nothing as stacked)")
-    ap.add_argument("--apply", action="store_true",
-                    help="write the manifest (default: preview only)")
+    ap.add_argument("--clear", action="store_true", help="empty [built] (mark nothing as stacked)")
+    ap.add_argument(
+        "--apply", action="store_true", help="write the manifest (default: preview only)"
+    )
     args = ap.parse_args()
 
     idir = args.integration_dir
@@ -91,19 +93,24 @@ def main():
     man = ingest.read_integration_toml(mpath)
     sessions = [] if args.clear else resolve_available(idir, man)
 
-    dates = [ingest.SESSION_RE.match(s).group("date")
-             for s in sessions if ingest.SESSION_RE.match(s)]
+    dates = [
+        ingest.SESSION_RE.match(s).group("date") for s in sessions if ingest.SESSION_RE.match(s)
+    ]
     data_through = max(dates) if dates else None
 
     print(f"Integration : {os.path.basename(os.path.normpath(idir))}")
-    print(f"Built       : {len(sessions)} session(s)"
-          + (f", data through {data_through}" if data_through else ""))
+    print(
+        f"Built       : {len(sessions)} session(s)"
+        + (f", data through {data_through}" if data_through else "")
+    )
     for s in sessions:
         print(f"  {s}")
 
     if not args.apply:
-        print("\nDRY RUN — nothing written. Re-run with --apply to record this, "
-              "then run ingest.py.")
+        print(
+            "\nDRY RUN — nothing written. Re-run with --apply to record this, "
+            "then run ingest.py."
+        )
         return
 
     text = open(mpath, encoding="utf-8").read()

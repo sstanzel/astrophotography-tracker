@@ -17,13 +17,14 @@ Defaults assume the script lives in  _organization/tracker/  and
 writes the database next to it. Run with no arguments after a capture night to
 refresh the tracker.
 """
+
 import os, re, sys, json, sqlite3, argparse, datetime
 
 # --------------------------------------------------------------------------
 # Library locations come from config.toml (via astro_config) — not hardcoded.
 # --------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import astro_config   # noqa: E402
+import astro_config  # noqa: E402
 
 # Top-level folders that are "other captures" — recorded but exempt from
 # deep-sky integration totals and v2 naming enforcement. Deliberately one
@@ -32,18 +33,27 @@ import astro_config   # noqa: E402
 # folds into "Nightscapes" — the old names stay recognized until those two
 # library cleanups are done (work items in Things, 2026-07-10).
 OTHER_CAPTURE_FOLDERS = {
-    "ASI EAA", "Asteroids Comets", "As_misc",
-    "Moon", "Moon Daytime", "Moon Nighttime",
+    "ASI EAA",
+    "Asteroids Comets",
+    "As_misc",
+    "Moon",
+    "Moon Daytime",
+    "Moon Nighttime",
     "Planets",
-    "Nightscapes", "As_Tl_Astrophotography Timelapse",
-    "Astrometry", "Spectroscopy", "Photometry", "Exoplanets", "Double Stars",
+    "Nightscapes",
+    "As_Tl_Astrophotography Timelapse",
+    "Astrometry",
+    "Spectroscopy",
+    "Photometry",
+    "Exoplanets",
+    "Double Stars",
 }
 
 # Folders to skip entirely at the target level.
 SKIP_TOPLEVEL = {"_organization", "_Calibration Library", "_sessions to organize"}
 
 # Parser import — fits_parser.py lives in the same directory.
-from fits_parser import parse as parse_fits, frame_kind, safe, is_non_science   # noqa: E402
+from fits_parser import parse as parse_fits, frame_kind, safe, is_non_science  # noqa: E402
 
 SESSION_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9_+\-]+)\s+(?P<scope>\S+)\s+(?P<sensor>\S+)\s+(?P<date>\d{4}-\d{2}-\d{2})$"
@@ -58,13 +68,19 @@ DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 def parse_target_folder(name):
     """Return dict(target_id, catalog, number, common_name, is_other)."""
     if name in OTHER_CAPTURE_FOLDERS:
-        return dict(target_id=name.replace(" ", "_"), catalog="Other",
-                    number=None, common_name=name, is_other=1)
+        return dict(
+            target_id=name.replace(" ", "_"),
+            catalog="Other",
+            number=None,
+            common_name=name,
+            is_other=1,
+        )
     m = CATALOG_RE.match(name)
     if not m:
         # Named-star or non-catalog folder (e.g. "Capella star")
-        return dict(target_id=name.replace(" ", "_"), catalog="?",
-                    number=None, common_name=name, is_other=0)
+        return dict(
+            target_id=name.replace(" ", "_"), catalog="?", number=None, common_name=name, is_other=0
+        )
     cat = m.group("cat")
     tokens = m.group("rest").split()
     num_tokens = []
@@ -73,8 +89,9 @@ def parse_target_folder(name):
     number = " ".join(num_tokens) if num_tokens else None
     common = " ".join(tokens) if tokens else None
     first_num = num_tokens[0] if num_tokens else (m.group("rest").split()[0])
-    return dict(target_id=f"{cat}_{first_num}", catalog=cat,
-                number=number, common_name=common, is_other=0)
+    return dict(
+        target_id=f"{cat}_{first_num}", catalog=cat, number=number, common_name=common, is_other=0
+    )
 
 
 def walk_fits(session_path):
@@ -122,10 +139,12 @@ def load_locations(path):
                 continue
             mh = re.match(r'\[\s*"?(.+?)"?\s*\]\s*$', s)
             if mh:
-                cur = mh.group(1); sites[cur] = {}; continue
+                cur = mh.group(1)
+                sites[cur] = {}
+                continue
             if cur is None:
                 continue
-            mk = re.match(r'(\w+)\s*=\s*(.+?)\s*(?:#.*)?$', s)
+            mk = re.match(r"(\w+)\s*=\s*(.+?)\s*(?:#.*)?$", s)
             if mk:
                 k, raw = mk.group(1), mk.group(2).strip()
                 if raw[:1] in "\"'":
@@ -138,8 +157,11 @@ def load_locations(path):
     out = {}
     for name, d in sites.items():
         if "latitude" in d and "longitude" in d:
-            out[name] = {"lat": float(d["latitude"]), "lon": float(d["longitude"]),
-                         "bortle": d.get("bortle")}
+            out[name] = {
+                "lat": float(d["latitude"]),
+                "lon": float(d["longitude"]),
+                "bortle": d.get("bortle"),
+            }
     return out
 
 
@@ -171,8 +193,8 @@ def parse_toml_tables(text, name):
         if cur is None:
             continue
         ms = re.match(r'(\w+)\s*=\s*"(.*?)"', line)
-        mb = re.match(r'(\w+)\s*=\s*(true|false)\s*$', line, re.I)
-        mn = re.match(r'(\w+)\s*=\s*(-?[\d.]+)\s*$', line)
+        mb = re.match(r"(\w+)\s*=\s*(true|false)\s*$", line, re.I)
+        mn = re.match(r"(\w+)\s*=\s*(-?[\d.]+)\s*$", line)
         if ms:
             cur[ms.group(1)] = ms.group(2)
         elif mb:
@@ -189,9 +211,18 @@ def read_notes_toml(session_path, session_name):
     flag (for a reviewed-kept-all session), and the `[[published]]`/`[[printed]]`
     entry lists (each a list of dicts).
     """
-    out = dict(present=False, location=None, moon_phase=None,
-               moon_illumination=None, moon_age_days=None,
-               edited=False, culled=False, published=[], printed=[], todos=[])
+    out = dict(
+        present=False,
+        location=None,
+        moon_phase=None,
+        moon_illumination=None,
+        moon_age_days=None,
+        edited=False,
+        culled=False,
+        published=[],
+        printed=[],
+        todos=[],
+    )
     p = os.path.join(session_path, f"{session_name} notes.toml")
     if not os.path.isfile(p):
         return out
@@ -201,7 +232,7 @@ def read_notes_toml(session_path, session_name):
     except OSError:
         return out
     for flag in ("edited", "culled"):
-        fm = re.search(r'^\s*' + flag + r'\s*=\s*(true|false)', txt, re.M | re.I)
+        fm = re.search(r"^\s*" + flag + r"\s*=\s*(true|false)", txt, re.M | re.I)
         out[flag] = bool(fm) and fm.group(1).lower() == "true"
     out["published"] = parse_toml_tables(txt, "published")
     out["printed"] = parse_toml_tables(txt, "printed")
@@ -211,14 +242,14 @@ def read_notes_toml(session_path, session_name):
     m = re.search(r'^moon_phase\s*=\s*"([^"]*)"', txt, re.M)
     if m and m.group(1):
         out["moon_phase"] = m.group(1)
-    m = re.search(r'^moon_illumination\s*=\s*([0-9.]+)', txt, re.M)
+    m = re.search(r"^moon_illumination\s*=\s*([0-9.]+)", txt, re.M)
     if m:
         out["moon_illumination"] = float(m.group(1))
-    m = re.search(r'^moon_age_days\s*=\s*([0-9.]+)', txt, re.M)
+    m = re.search(r"^moon_age_days\s*=\s*([0-9.]+)", txt, re.M)
     if m:
         out["moon_age_days"] = float(m.group(1))
     # [future_processing] todo = [ "…", "…" ]  — reprocessing to-do items.
-    am = re.search(r'(?ms)^\s*todo\s*=\s*\[(.*?)\]', txt)
+    am = re.search(r"(?ms)^\s*todo\s*=\s*\[(.*?)\]", txt)
     out["todos"] = re.findall(r'"([^"]*)"', am.group(1)) if am else []
     return out
 
@@ -245,17 +276,36 @@ def insert_publications(cur, target_id, session_id, integration_id, published, p
         k = (e.get("kind") or "other").lower()
         if k not in ("astrobin", "social", "other"):
             k = "other"
-        cur.execute("""INSERT INTO publications(target_id, session_id, integration_id,
+        cur.execute(
+            """INSERT INTO publications(target_id, session_id, integration_id,
                        kind, url, title, published_at, notes)
                        VALUES(?,?,?,?,?,?,?,?)""",
-                    (target_id, session_id, integration_id, k,
-                     e.get("url"), e.get("title"), e.get("date"), e.get("note")))
+            (
+                target_id,
+                session_id,
+                integration_id,
+                k,
+                e.get("url"),
+                e.get("title"),
+                e.get("date"),
+                e.get("note"),
+            ),
+        )
     for e in printed:
-        cur.execute("""INSERT INTO publications(target_id, session_id, integration_id,
+        cur.execute(
+            """INSERT INTO publications(target_id, session_id, integration_id,
                        kind, url, title, published_at, notes)
                        VALUES(?,?,?,'print',?,?,?,?)""",
-                    (target_id, session_id, integration_id,
-                     e.get("url"), e.get("title"), e.get("date"), e.get("note")))
+            (
+                target_id,
+                session_id,
+                integration_id,
+                e.get("url"),
+                e.get("title"),
+                e.get("date"),
+                e.get("note"),
+            ),
+        )
 
 
 def detect_method(container_path):
@@ -273,6 +323,7 @@ def detect_method(container_path):
     Returns:
         'PI Magic' | 'PixInsight' | 'other' | None.
     """
+
     def has_files(sub):
         p = os.path.join(container_path, sub)
         if not os.path.isdir(p):
@@ -337,8 +388,7 @@ def resolve_auto_members(target_path, rig, span, exclude):
         m = SESSION_RE.match(sname)
         if not m or not span_matches(m.group("date"), span) or sname in excl:
             continue
-        if scope_want and (m.group("scope") != scope_want
-                           or m.group("sensor") != sensor_want):
+        if scope_want and (m.group("scope") != scope_want or m.group("sensor") != sensor_want):
             continue
         out.append(sname)
     return out
@@ -358,23 +408,23 @@ def read_integration_toml(path):
         return None
 
     def s(key):
-        m = re.search(r'^\s*' + key + r'\s*=\s*"([^"]*)"', txt, re.M)
+        m = re.search(r"^\s*" + key + r'\s*=\s*"([^"]*)"', txt, re.M)
         return m.group(1) if m else None
 
     def i(key):
-        m = re.search(r'^\s*' + key + r'\s*=\s*(\d+)', txt, re.M)
+        m = re.search(r"^\s*" + key + r"\s*=\s*(\d+)", txt, re.M)
         return int(m.group(1)) if m else None
 
     def flt(key):
-        m = re.search(r'^\s*' + key + r'\s*=\s*([\d.]+)', txt, re.M)
+        m = re.search(r"^\s*" + key + r"\s*=\s*([\d.]+)", txt, re.M)
         return float(m.group(1)) if m else None
 
     def b(key):
-        m = re.search(r'^\s*' + key + r'\s*=\s*(true|false)', txt, re.M | re.I)
+        m = re.search(r"^\s*" + key + r"\s*=\s*(true|false)", txt, re.M | re.I)
         return bool(m) and m.group(1).lower() == "true"
 
     def arr(key):
-        m = re.search(r'(?ms)^\s*' + key + r'\s*=\s*\[(.*?)\]', txt)
+        m = re.search(r"(?ms)^\s*" + key + r"\s*=\s*\[(.*?)\]", txt)
         return re.findall(r'"([^"]*)"', m.group(1)) if m else []
 
     mode = s("mode")
@@ -384,8 +434,8 @@ def read_integration_toml(path):
         "span": s("span"),
         "goal_hours": flt("goal_hours"),
         "exclude": arr("exclude"),
-        "members": arr("members"),           # legacy explicit list
-        "built_sessions": arr("sessions"),   # [built].sessions
+        "members": arr("members"),  # legacy explicit list
+        "built_sessions": arr("sessions"),  # [built].sessions
         "kind": s("kind"),
         "version": i("version") or 1,
         "edited": b("edited"),
@@ -423,27 +473,27 @@ def read_fits_header(path):
 # Ingest steps
 # ==========================================================================
 SESSION_NEW_COLS = [
-    ("notes_toml_present",  "INTEGER DEFAULT 0"),
+    ("notes_toml_present", "INTEGER DEFAULT 0"),
     ("unparsed_file_count", "INTEGER DEFAULT 0"),
-    ("other_image_count",   "INTEGER DEFAULT 0"),
-    ("results_file_count",  "INTEGER DEFAULT 0"),
-    ("fits_site_lat",       "REAL"),
-    ("fits_site_lon",       "REAL"),
-    ("fits_instrument",     "TEXT"),
-    ("stage_culled",        "INTEGER DEFAULT 0"),   # 2 Culled
-    ("stage_integrate",     "INTEGER DEFAULT 0"),   # 3 Integrated (single-session)
-    ("stage_edit",          "INTEGER DEFAULT 0"),   # 4 Edited
-    ("stage_publish",       "INTEGER DEFAULT 0"),   # 5 Published
-    ("stage_print",         "INTEGER DEFAULT 0"),   # 6 Printed
-    ("integration_method",  "TEXT"),                # PixInsight|PI Magic|other
-    ("astrobin_url",        "TEXT"),
+    ("other_image_count", "INTEGER DEFAULT 0"),
+    ("results_file_count", "INTEGER DEFAULT 0"),
+    ("fits_site_lat", "REAL"),
+    ("fits_site_lon", "REAL"),
+    ("fits_instrument", "TEXT"),
+    ("stage_culled", "INTEGER DEFAULT 0"),  # 2 Culled
+    ("stage_integrate", "INTEGER DEFAULT 0"),  # 3 Integrated (single-session)
+    ("stage_edit", "INTEGER DEFAULT 0"),  # 4 Edited
+    ("stage_publish", "INTEGER DEFAULT 0"),  # 5 Published
+    ("stage_print", "INTEGER DEFAULT 0"),  # 6 Printed
+    ("integration_method", "TEXT"),  # PixInsight|PI Magic|other
+    ("astrobin_url", "TEXT"),
 ]
 
 # Columns added to the integrations table on an existing DB (no-op on a fresh
 # one). The CHECK on membership_mode lives in schema.sql for new DBs only.
 INTEGRATION_NEW_COLS = [
-    ("membership_mode",    "TEXT NOT NULL DEFAULT 'auto'"),
-    ("goal_hours",         "REAL"),
+    ("membership_mode", "TEXT NOT NULL DEFAULT 'auto'"),
+    ("goal_hours", "REAL"),
     ("integration_method", "TEXT"),
 ]
 
@@ -493,9 +543,8 @@ def in_processing_area(abs_path, session_path):
     """True if abs_path sits inside a processing-output subfolder of the session
     (PI Process, PI Magic, a .pxiproject bundle, or a Results folder)."""
     rel = os.path.relpath(abs_path, session_path)
-    for part in rel.split(os.sep)[:-1]:        # directory components only
-        if (part in PROCESSING_DIRS or part.endswith(".pxiproject")
-                or part.endswith(" Results")):
+    for part in rel.split(os.sep)[:-1]:  # directory components only
+        if part in PROCESSING_DIRS or part.endswith(".pxiproject") or part.endswith(" Results"):
             return True
     return False
 
@@ -508,8 +557,7 @@ def has_master_file(path):
     """
     for _r, _d, files in os.walk(path):
         for f in files:
-            if f.lower().startswith("master") and f.lower().endswith(
-                    (".xisf", ".fit", ".fits")):
+            if f.lower().startswith("master") and f.lower().endswith((".xisf", ".fit", ".fits")):
                 return True
     return False
 
@@ -566,8 +614,9 @@ def apply_migrations(con):
     for tbl in ("scopes", "sensors"):
         cols = {r[1] for r in cur.execute(f"PRAGMA table_info({tbl})")}
         if "from_registry" not in cols:
-            cur.execute(f"ALTER TABLE {tbl} ADD COLUMN "
-                        f"from_registry INTEGER NOT NULL DEFAULT 0")
+            cur.execute(
+                f"ALTER TABLE {tbl} ADD COLUMN " f"from_registry INTEGER NOT NULL DEFAULT 0"
+            )
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS validation_findings (
             finding_id  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -589,8 +638,9 @@ def apply_migrations(con):
                      ELSE 2 END, code;
     """)
     # Recreate the frames table if its grammar CHECK predates 'asiair_dslr'.
-    frow = cur.execute("SELECT sql FROM sqlite_master "
-                       "WHERE type='table' AND name='frames'").fetchone()
+    frow = cur.execute(
+        "SELECT sql FROM sqlite_master " "WHERE type='table' AND name='frames'"
+    ).fetchone()
     if frow and "asiair_dslr" not in frow[0]:
         cur.executescript(FRAMES_TABLE_REBUILD)
 
@@ -640,8 +690,10 @@ def apply_migrations(con):
     """)
     pcols = {r[1] for r in cur.execute("PRAGMA table_info(publications)")}
     if pcols and "integration_id" not in pcols:
-        cur.execute("ALTER TABLE publications ADD COLUMN integration_id INTEGER "
-                    "REFERENCES integrations(integration_id)")
+        cur.execute(
+            "ALTER TABLE publications ADD COLUMN integration_id INTEGER "
+            "REFERENCES integrations(integration_id)"
+        )
     # In-place column adds for a pre-existing integrations table / members table.
     icols = {r[1] for r in cur.execute("PRAGMA table_info(integrations)")}
     for col, decl in INTEGRATION_NEW_COLS:
@@ -649,8 +701,9 @@ def apply_migrations(con):
             cur.execute(f"ALTER TABLE integrations ADD COLUMN {col} {decl}")
     imcols = {r[1] for r in cur.execute("PRAGMA table_info(integration_members)")}
     if "in_build" not in imcols:
-        cur.execute("ALTER TABLE integration_members "
-                    "ADD COLUMN in_build INTEGER NOT NULL DEFAULT 0")
+        cur.execute(
+            "ALTER TABLE integration_members " "ADD COLUMN in_build INTEGER NOT NULL DEFAULT 0"
+        )
 
     cur.executescript("""
         DROP VIEW IF EXISTS v_session_pipeline;
@@ -893,39 +946,60 @@ def apply_migrations(con):
 
 def populate_vocabularies(con, org_root, log):
     """Read scope/sensor/filter/combo names from _organization/ folders."""
+
     def names(sub):
         p = os.path.join(org_root, sub)
         if not os.path.isdir(p):
             return []
-        return sorted(d for d in os.listdir(p)
-                      if not d.startswith(".") and not d.startswith("!")
-                      and os.path.isdir(os.path.join(p, d)))
+        return sorted(
+            d
+            for d in os.listdir(p)
+            if not d.startswith(".") and not d.startswith("!") and os.path.isdir(os.path.join(p, d))
+        )
 
     cur = con.cursor()
     for sc in names("scope_values"):
-        cur.execute("INSERT INTO scopes(scope, is_imaging, from_registry) VALUES(?,0,1) "
-                    "ON CONFLICT(scope) DO UPDATE SET from_registry=1", (sc,))
+        cur.execute(
+            "INSERT INTO scopes(scope, is_imaging, from_registry) VALUES(?,0,1) "
+            "ON CONFLICT(scope) DO UPDATE SET from_registry=1",
+            (sc,),
+        )
     for sn in names("sensor_values"):
-        cur.execute("INSERT INTO sensors(sensor, is_imaging, from_registry) VALUES(?,0,1) "
-                    "ON CONFLICT(sensor) DO UPDATE SET from_registry=1", (sn,))
+        cur.execute(
+            "INSERT INTO sensors(sensor, is_imaging, from_registry) VALUES(?,0,1) "
+            "ON CONFLICT(sensor) DO UPDATE SET from_registry=1",
+            (sn,),
+        )
     for combo in names("scope+sensor_values"):
         if "_" in combo:
             sc, sn = combo.split("_", 1)
             # ensure both vocab rows exist before linking; mark as registry + imaging
-            cur.execute("INSERT INTO scopes(scope, is_imaging, from_registry) VALUES(?,1,1) "
-                        "ON CONFLICT(scope) DO UPDATE SET is_imaging=1, from_registry=1", (sc,))
-            cur.execute("INSERT INTO sensors(sensor, is_imaging, from_registry) VALUES(?,1,1) "
-                        "ON CONFLICT(sensor) DO UPDATE SET is_imaging=1, from_registry=1", (sn,))
-            cur.execute("INSERT OR IGNORE INTO scope_sensor_combos(scope, sensor) VALUES(?, ?)", (sc, sn))
+            cur.execute(
+                "INSERT INTO scopes(scope, is_imaging, from_registry) VALUES(?,1,1) "
+                "ON CONFLICT(scope) DO UPDATE SET is_imaging=1, from_registry=1",
+                (sc,),
+            )
+            cur.execute(
+                "INSERT INTO sensors(sensor, is_imaging, from_registry) VALUES(?,1,1) "
+                "ON CONFLICT(sensor) DO UPDATE SET is_imaging=1, from_registry=1",
+                (sn,),
+            )
+            cur.execute(
+                "INSERT OR IGNORE INTO scope_sensor_combos(scope, sensor) VALUES(?, ?)", (sc, sn)
+            )
     for filt in names("filter_values"):
         # folder names carry "LABEL - description"; split on first " - "
         label = filt.split(" - ", 1)[0].strip()
-        cur.execute("INSERT OR IGNORE INTO filters(filter, description) VALUES(?, ?)", (label, filt))
+        cur.execute(
+            "INSERT OR IGNORE INTO filters(filter, description) VALUES(?, ?)", (label, filt)
+        )
     con.commit()
-    log(f"  vocabularies: {len(names('scope_values'))} scopes, "
+    log(
+        f"  vocabularies: {len(names('scope_values'))} scopes, "
         f"{len(names('sensor_values'))} sensors, "
         f"{len(names('scope+sensor_values'))} combos, "
-        f"{len(names('filter_values'))} filters")
+        f"{len(names('filter_values'))} filters"
+    )
 
 
 def populate_planned_targets(con, org_root, log):
@@ -949,13 +1023,15 @@ def populate_planned_targets(con, org_root, log):
         if name.startswith((".", "_")) or not os.path.isdir(os.path.join(reg, name)):
             continue
         tp = parse_target_folder(name)
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO targets(target_id, catalog, number, common_name,
                                 folder_name, is_other_capture)
             VALUES(?,?,?,?,?,?)
             ON CONFLICT(target_id) DO NOTHING
-        """, (tp["target_id"], tp["catalog"], tp["number"], tp["common_name"],
-              name, tp["is_other"]))
+        """,
+            (tp["target_id"], tp["catalog"], tp["number"], tp["common_name"], name, tp["is_other"]),
+        )
         n += 1
     con.commit()
     log(f"  planned targets: {n} registry entries")
@@ -990,7 +1066,7 @@ def populate_target_goals(con, org_root, log):
                 block = None
                 continue
             ms = re.match(r'(\w+)\s*=\s*"(.*?)"', line)
-            mn = re.match(r'(\w+)\s*=\s*([\d.]+)', line)
+            mn = re.match(r"(\w+)\s*=\s*([\d.]+)", line)
             if ms and block is not None:
                 block[ms.group(1)] = ms.group(2)
             elif mn and block is not None:
@@ -1006,14 +1082,16 @@ def populate_target_goals(con, org_root, log):
         if not cur.execute("SELECT 1 FROM targets WHERE target_id=?", (tid,)).fetchone():
             skipped += 1
             continue
-        cur.execute("""INSERT INTO target_goals(target_id, goal_hours, priority)
+        cur.execute(
+            """INSERT INTO target_goals(target_id, goal_hours, priority)
                        VALUES(?,?,?)""",
-                    (tid, g.get("hours"),
-                     int(g["priority"]) if "priority" in g else None))
+            (tid, g.get("hours"), int(g["priority"]) if "priority" in g else None),
+        )
         n += 1
     con.commit()
-    log(f"  target goals: {n} loaded" + (f", {skipped} skipped (unknown target)"
-                                         if skipped else ""))
+    log(
+        f"  target goals: {n} loaded" + (f", {skipped} skipped (unknown target)" if skipped else "")
+    )
 
 
 def populate_calibration_thresholds(con, org_root, log):
@@ -1062,41 +1140,49 @@ def populate_calibration_thresholds(con, org_root, log):
             if line.startswith("["):
                 block, in_coverage = None, False
                 continue
-            mb = re.match(r'(\w+)\s*=\s*(true|false)\b', line)
+            mb = re.match(r"(\w+)\s*=\s*(true|false)\b", line)
             ms = re.match(r'(\w+)\s*=\s*"(.*?)"', line)
-            mn = re.match(r'(\w+)\s*=\s*(-?[\d.]+)', line)
+            mn = re.match(r"(\w+)\s*=\s*(-?[\d.]+)", line)
             if in_coverage:
                 if mb:
-                    coverage[mb.group(1)] = (mb.group(2) == "true")
+                    coverage[mb.group(1)] = mb.group(2) == "true"
                 continue
             if ms and block is not None:
                 block[ms.group(1)] = ms.group(2)
             elif mn and block is not None:
                 block[mn.group(1)] = float(mn.group(2))
     if "require_bias" in coverage:
-        cur.execute("UPDATE coverage_settings SET require_bias=? WHERE id=1",
-                    (1 if coverage["require_bias"] else 0,))
-        log(f"  coverage recipe: require_bias="
-            f"{'true' if coverage['require_bias'] else 'false'}")
-    valid = [t for t in rows
-             if t.get("class") in ("bias", "dark", "flat") and "min_frames" in t]
+        cur.execute(
+            "UPDATE coverage_settings SET require_bias=? WHERE id=1",
+            (1 if coverage["require_bias"] else 0,),
+        )
+        log(
+            f"  coverage recipe: require_bias=" f"{'true' if coverage['require_bias'] else 'false'}"
+        )
+    valid = [t for t in rows if t.get("class") in ("bias", "dark", "flat") and "min_frames" in t]
     if not valid:
         log("  calibration thresholds: file present but no valid blocks — kept existing")
         con.commit()
         return
     cur.execute("DELETE FROM calibration_thresholds")
     for t in valid:
-        cur.execute("""INSERT INTO calibration_thresholds
+        cur.execute(
+            """INSERT INTO calibration_thresholds
                        (class, camera, scope, temperature_c, gain, exp_s,
                         min_frames, refresh_days, notes)
                        VALUES(?,?,?,?,?,?,?,?,?)""",
-                    (t["class"], t.get("camera"), t.get("scope"),
-                     t.get("temperature_c"),
-                     int(t["gain"]) if "gain" in t else None,
-                     t.get("exp_s"),
-                     int(t["min_frames"]),
-                     int(t["refresh_days"]) if "refresh_days" in t else None,
-                     t.get("notes")))
+            (
+                t["class"],
+                t.get("camera"),
+                t.get("scope"),
+                t.get("temperature_c"),
+                int(t["gain"]) if "gain" in t else None,
+                t.get("exp_s"),
+                int(t["min_frames"]),
+                int(t["refresh_days"]) if "refresh_days" in t else None,
+                t.get("notes"),
+            ),
+        )
     con.commit()
     log(f"  calibration thresholds: {len(valid)} loaded")
 
@@ -1115,14 +1201,14 @@ def ingest_library(con, library_id, root, obs, locations, log):
         tpath = os.path.join(root, tname)
         # Skip dotfiles, leading-underscore utility folders (_organization,
         # _to_delete, _added, ...), and named skips.
-        if (tname.startswith((".", "_")) or tname in SKIP_TOPLEVEL
-                or not os.path.isdir(tpath)):
+        if tname.startswith((".", "_")) or tname in SKIP_TOPLEVEL or not os.path.isdir(tpath):
             continue
         tp = parse_target_folder(tname)
 
         # Upsert target. folder_path columns are per-library.
         rel_target = tname
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO targets(target_id, catalog, number, common_name, folder_name, is_other_capture)
             VALUES(?,?,?,?,?,?)
             ON CONFLICT(target_id) DO UPDATE SET
@@ -1131,8 +1217,16 @@ def ingest_library(con, library_id, root, obs, locations, log):
               folder_name=excluded.folder_name,
               is_other_capture=excluded.is_other_capture,
               updated_at=CURRENT_TIMESTAMP
-        """, (tp["target_id"], tp["catalog"], tp["number"], tp["common_name"],
-              tname, tp["is_other"]))
+        """,
+            (
+                tp["target_id"],
+                tp["catalog"],
+                tp["number"],
+                tp["common_name"],
+                tname,
+                tp["is_other"],
+            ),
+        )
         n_targets += 1
 
         # Sessions inside this target
@@ -1141,7 +1235,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
             if sname.startswith(".") or sname.startswith("_") or not os.path.isdir(spath):
                 continue
             if sname == "integrations":
-                continue                      # handled by ingest_integrations()
+                continue  # handled by ingest_integrations()
             sm = SESSION_RE.match(sname)
             if not sm:
                 # Non-v2 folder name. Expected inside other-capture buckets;
@@ -1156,7 +1250,8 @@ def ingest_library(con, library_id, root, obs, locations, log):
 
             rel_session = os.path.join(rel_target, sname)
             # Upsert the session on its natural key; keep session_id stable.
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO sessions(target_id, scope, sensor, session_date, library_id,
                                      folder_path, is_other_capture)
                 VALUES(?,?,?,?,?,?,?)
@@ -1165,11 +1260,14 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   folder_path=excluded.folder_path,
                   is_other_capture=excluded.is_other_capture,
                   updated_at=CURRENT_TIMESTAMP
-            """, (tp["target_id"], scope, sensor, sdate, library_id,
-                  rel_session, tp["is_other"]))
-            sid = cur.execute("""SELECT session_id FROM sessions
+            """,
+                (tp["target_id"], scope, sensor, sdate, library_id, rel_session, tp["is_other"]),
+            )
+            sid = cur.execute(
+                """SELECT session_id FROM sessions
                                  WHERE target_id=? AND scope=? AND sensor=? AND session_date=?""",
-                              (tp["target_id"], scope, sensor, sdate)).fetchone()[0]
+                (tp["target_id"], scope, sensor, sdate),
+            ).fetchone()[0]
             n_sessions += 1
 
             # Re-ingest frames: delete then re-insert so counts stay exact.
@@ -1177,18 +1275,19 @@ def ingest_library(con, library_id, root, obs, locations, log):
             counts = {"light": 0, "flat": 0, "dark": 0, "dark_flat": 0, "bias": 0}
             rejected = 0
             integration_s = 0.0
-            unparsed = 0          # FITS-extension files whose name did not parse
-            header_src = None     # first kept light .fit/.fits — sampled for headers
+            unparsed = 0  # FITS-extension files whose name did not parse
+            header_src = None  # first kept light .fit/.fits — sampled for headers
             for abs_path, is_rej, m in walk_fits(spath):
                 if m is None:
                     # Count only raw-capture files that failed to parse — not
                     # PixInsight processing output (debayered .xisf etc.) and
                     # not deliberate non-science captures (snapshots/previews).
-                    if (not in_processing_area(abs_path, spath)
-                            and not is_non_science(os.path.basename(abs_path))):
+                    if not in_processing_area(abs_path, spath) and not is_non_science(
+                        os.path.basename(abs_path)
+                    ):
                         unparsed += 1
                     continue
-                kind = frame_kind(m)              # light/flat/dark/bias/darkflat
+                kind = frame_kind(m)  # light/flat/dark/bias/darkflat
                 ftype = "dark_flat" if kind == "darkflat" else kind
                 unit = (safe(m, "unit", "s") or "s").lower()
                 exp_value = float(m.group("exp"))
@@ -1206,34 +1305,61 @@ def ingest_library(con, library_id, root, obs, locations, log):
                 if dt:
                     captured = f"{dt[:4]}-{dt[4:6]}-{dt[6:8]} {dt[9:11]}:{dt[11:13]}:{dt[13:15]}"
                 else:
-                    d = m.groupdict().get("date"); t = m.groupdict().get("time")
+                    d = m.groupdict().get("date")
+                    t = m.groupdict().get("time")
                     captured = f"{d} {t.replace('-', ':')}" if d and t else None
                 binning = m.groupdict().get("bin")
                 if binning is None:
-                    bx = m.groupdict().get("binx"); by = m.groupdict().get("biny")
+                    bx = m.groupdict().get("binx")
+                    by = m.groupdict().get("biny")
                     binning = f"{bx}x{by}" if bx else "?"
-                grammar = ("nina_v2" if "HFR" in m.re.pattern
-                          else "nina_legacy" if "__" in m.re.pattern and "binx" in m.groupdict()
-                          else "asiair_dslr" if "ISO" in m.re.pattern
-                          else "asiair_cal" if "target" not in m.groupdict()
-                          else "asiair_sci")
+                grammar = (
+                    "nina_v2"
+                    if "HFR" in m.re.pattern
+                    else (
+                        "nina_legacy"
+                        if "__" in m.re.pattern and "binx" in m.groupdict()
+                        else (
+                            "asiair_dslr"
+                            if "ISO" in m.re.pattern
+                            else "asiair_cal" if "target" not in m.groupdict() else "asiair_sci"
+                        )
+                    )
+                )
                 try:
                     fsize = os.path.getsize(abs_path)
                 except OSError:
                     fsize = None
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT OR IGNORE INTO frames(session_id, frame_type, is_rejected,
                         exp_value, exp_unit, exp_s, binning, camera_short, gain, temp_c,
                         rotation_deg, captured_at_utc, filter, hfr, rms_arcsec,
                         grammar, file_path, file_size_bytes, sequence_index)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (sid, ftype, 1 if is_rej else 0, exp_value, unit, exp_s, binning,
-                      m.group("cam"), gain, temp, rot, captured,
-                      safe(m, "filter"),
-                      float(hfr) if hfr else None,
-                      float(rms) if rms else None,
-                      grammar, os.path.join(rel_session, os.path.relpath(abs_path, spath)),
-                      fsize, int(m.group("idx")) if m.groupdict().get("idx") else None))
+                """,
+                    (
+                        sid,
+                        ftype,
+                        1 if is_rej else 0,
+                        exp_value,
+                        unit,
+                        exp_s,
+                        binning,
+                        m.group("cam"),
+                        gain,
+                        temp,
+                        rot,
+                        captured,
+                        safe(m, "filter"),
+                        float(hfr) if hfr else None,
+                        float(rms) if rms else None,
+                        grammar,
+                        os.path.join(rel_session, os.path.relpath(abs_path, spath)),
+                        fsize,
+                        int(m.group("idx")) if m.groupdict().get("idx") else None,
+                    ),
+                )
                 n_frames += 1
                 if ftype == "light":
                     if is_rej:
@@ -1249,8 +1375,11 @@ def ingest_library(con, library_id, root, obs, locations, log):
 
             # Validation inputs: sample one light frame's FITS header, and read
             # the session's notes.toml. Both are best-effort.
-            hdr = read_fits_header(header_src) if header_src else \
-                  dict(site_lat=None, site_lon=None, instrument=None, telescope=None)
+            hdr = (
+                read_fits_header(header_src)
+                if header_src
+                else dict(site_lat=None, site_lon=None, instrument=None, telescope=None)
+            )
             notes = read_notes_toml(spath, sname)
             # A session with no FITS frames may still be a DSLR session whose
             # raws are CR3/NEF/... — count those so it is not flagged empty.
@@ -1262,17 +1391,20 @@ def ingest_library(con, library_id, root, obs, locations, log):
             results_files = 0
             if os.path.isdir(results_dir):
                 for _r, _d, _f in os.walk(results_dir):
-                    results_files += sum(1 for x in _f
-                                         if x != ".DS_Store" and not x.startswith("._"))
+                    results_files += sum(
+                        1 for x in _f if x != ".DS_Store" and not x.startswith("._")
+                    )
             bortle = None
             if notes["location"] and notes["location"] in locations:
                 bortle = locations[notes["location"]].get("bortle")
-            notes_rel = (os.path.join(rel_session, f"{sname} notes.toml")
-                         if notes["present"] else None)
+            notes_rel = (
+                os.path.join(rel_session, f"{sname} notes.toml") if notes["present"] else None
+            )
 
             # Refresh denormalised counts + validation inputs + notes metadata.
-            method = detect_method(spath)   # PixInsight|PI Magic|other|None
-            cur.execute("""
+            method = detect_method(spath)  # PixInsight|PI Magic|other|None
+            cur.execute(
+                """
                 UPDATE sessions SET
                   lights_kept=?, lights_rejected=?, flats_count=?, dark_flats_count=?,
                   darks_count=?, bias_count=?, integration_s=?,
@@ -1287,29 +1419,51 @@ def ingest_library(con, library_id, root, obs, locations, log):
                       ELSE COALESCE(integration_method, ?) END,
                   updated_at=CURRENT_TIMESTAMP
                 WHERE session_id=?
-            """, (counts["light"], rejected, counts["flat"], counts["dark_flat"],
-                  counts["dark"], counts["bias"], round(integration_s, 1),
-                  unparsed, other_images, results_files,
-                  1 if notes["present"] else 0,
-                  # stage_culled: rejects pulled, OR integrated (culled at stack),
-                  # OR you explicitly marked a reviewed-kept-all session.
-                  2 if (rejected > 0 or results_files > 0 or notes["culled"]) else 0,
-                  2 if results_files > 0 else 0,   # stage_integrate: results = done
-                  2 if notes["edited"] else 0,
-                  2 if notes["published"] else 0,  # non-empty [[published]] list
-                  2 if notes["printed"] else 0,    # non-empty [[printed]] list
-                  next((e.get("url") for e in notes["published"] if e.get("url")), None),
-                  hdr["site_lat"], hdr["site_lon"], hdr["instrument"],
-                  hdr["telescope"], notes["location"], bortle,
-                  notes["moon_age_days"], notes["moon_illumination"], notes_rel,
-                  method, method, method,
-                  sid))
-            insert_publications(cur, tp["target_id"], sid, None,
-                                notes["published"], notes["printed"])
+            """,
+                (
+                    counts["light"],
+                    rejected,
+                    counts["flat"],
+                    counts["dark_flat"],
+                    counts["dark"],
+                    counts["bias"],
+                    round(integration_s, 1),
+                    unparsed,
+                    other_images,
+                    results_files,
+                    1 if notes["present"] else 0,
+                    # stage_culled: rejects pulled, OR integrated (culled at stack),
+                    # OR you explicitly marked a reviewed-kept-all session.
+                    2 if (rejected > 0 or results_files > 0 or notes["culled"]) else 0,
+                    2 if results_files > 0 else 0,  # stage_integrate: results = done
+                    2 if notes["edited"] else 0,
+                    2 if notes["published"] else 0,  # non-empty [[published]] list
+                    2 if notes["printed"] else 0,  # non-empty [[printed]] list
+                    next((e.get("url") for e in notes["published"] if e.get("url")), None),
+                    hdr["site_lat"],
+                    hdr["site_lon"],
+                    hdr["instrument"],
+                    hdr["telescope"],
+                    notes["location"],
+                    bortle,
+                    notes["moon_age_days"],
+                    notes["moon_illumination"],
+                    notes_rel,
+                    method,
+                    method,
+                    method,
+                    sid,
+                ),
+            )
+            insert_publications(
+                cur, tp["target_id"], sid, None, notes["published"], notes["printed"]
+            )
             cur.execute("DELETE FROM processing_todos WHERE session_id=?", (sid,))
             for i, td in enumerate(notes["todos"]):
-                cur.execute("INSERT INTO processing_todos(session_id, seq, todo) "
-                            "VALUES(?,?,?)", (sid, i, td))
+                cur.execute(
+                    "INSERT INTO processing_todos(session_id, seq, todo) " "VALUES(?,?,?)",
+                    (sid, i, td),
+                )
 
     con.commit()
     log(f"  {library_id}: {n_targets} targets, {n_sessions} sessions, {n_frames} frames")
@@ -1332,7 +1486,8 @@ def ingest_calibration(con, library_id, root, obs, log):
     n = 0
 
     def upsert(rec):
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO calibration_masters(library_id, class, folder_path, camera, scope,
                 temperature_c, gain, exp_s, capture_date, frame_count, total_size_bytes,
                 is_generated_master)
@@ -1349,7 +1504,9 @@ def ingest_calibration(con, library_id, root, obs, log):
               capture_date=excluded.capture_date,
               is_generated_master=excluded.is_generated_master,
               updated_at=CURRENT_TIMESTAMP
-        """, rec)
+        """,
+            rec,
+        )
 
     def date_of(name):
         m = DATE_RE.search(name)
@@ -1367,7 +1524,7 @@ def ingest_calibration(con, library_id, root, obs, log):
             cdir = os.path.join(bias_root, cam)
             if not os.path.isdir(cdir):
                 continue
-            sets = []                       # (set_path, set_name, gain_from_path)
+            sets = []  # (set_path, set_name, gain_from_path)
             for sub in os.listdir(cdir):
                 if sub.startswith(".") or "example" in sub.lower():
                     continue
@@ -1377,10 +1534,11 @@ def ingest_calibration(con, library_id, root, obs, log):
                 gm = gain_dir_re.match(sub)
                 if gm:
                     gain = int(gm.group(1) or gm.group(2))
-                    sets += [(os.path.join(sp, d), d, gain)
-                             for d in os.listdir(sp)
-                             if not d.startswith(".")
-                             and os.path.isdir(os.path.join(sp, d))]
+                    sets += [
+                        (os.path.join(sp, d), d, gain)
+                        for d in os.listdir(sp)
+                        if not d.startswith(".") and os.path.isdir(os.path.join(sp, d))
+                    ]
                 else:
                     sets.append((sp, sub, None))
             for sp, sub, gain in sets:
@@ -1390,12 +1548,22 @@ def ingest_calibration(con, library_id, root, obs, log):
                     continue
                 is_master = 1 if has_master_file(sp) else 0
                 rel = os.path.relpath(sp, root)
-                upsert({"library_id": library_id, "class": "bias", "folder_path": rel,
-                        "camera": cam, "scope": None, "temperature_c": None,
+                upsert(
+                    {
+                        "library_id": library_id,
+                        "class": "bias",
+                        "folder_path": rel,
+                        "camera": cam,
+                        "scope": None,
+                        "temperature_c": None,
                         "gain": gain if gain is not None else detect_set_gain(sp),
-                        "exp_s": None, "capture_date": date_of(sub),
-                        "frame_count": fc, "total_size_bytes": sz,
-                        "is_generated_master": is_master})
+                        "exp_s": None,
+                        "capture_date": date_of(sub),
+                        "frame_count": fc,
+                        "total_size_bytes": sz,
+                        "is_generated_master": is_master,
+                    }
+                )
                 n += 1
 
     # --- Dark: deep tree {Camera}/{Temp}/{Gain}/{Exp}/{Dark date} ---
@@ -1416,9 +1584,12 @@ def ingest_calibration(con, library_id, root, obs, log):
                 tm = re.match(r"^(-?\d+(?:\.\d+)?)C$", part)
                 gm = re.match(r"^Gain(-?\d+)$", part) or re.match(r"^ISO(\d+)$", part)
                 em = re.match(r"^(\d+(?:\.\d+)?)s$", part)
-                if tm: temp = float(tm.group(1))
-                if gm: gain = int(gm.group(1))
-                if em: exp = float(em.group(1))
+                if tm:
+                    temp = float(tm.group(1))
+                if gm:
+                    gain = int(gm.group(1))
+                if em:
+                    exp = float(em.group(1))
             leaf = parts[-1]
             # Some dark libraries skip the {Temp}/{Gain}/{Exp} tree and carry
             # the parameters in the ASIAir-style set name instead, e.g.
@@ -1429,18 +1600,34 @@ def ingest_calibration(con, library_id, root, obs, log):
                     tm = re.match(r"^(-?\d+(?:\.\d+)?)C$", tok)
                     gm = re.match(r"^[Gg]ain(-?\d+)$", tok) or re.match(r"^ISO(\d+)$", tok)
                     em = re.match(r"^(\d+(?:\.\d+)?)s$", tok)
-                    if tm and temp is None: temp = float(tm.group(1))
-                    if gm and gain is None: gain = int(gm.group(1))
-                    if em and exp  is None: exp  = float(em.group(1))
+                    if tm and temp is None:
+                        temp = float(tm.group(1))
+                    if gm and gain is None:
+                        gain = int(gm.group(1))
+                    if em and exp is None:
+                        exp = float(em.group(1))
             is_master = 1 if has_master_file(camroot) else 0
             fc, sz = len(real_files), sum(
-                os.path.getsize(os.path.join(camroot, f)) for f in real_files
-                if os.path.exists(os.path.join(camroot, f)))
-            upsert({"library_id": library_id, "class": "dark", "folder_path": rel,
-                    "camera": camera, "scope": None, "temperature_c": temp, "gain": gain,
-                    "exp_s": exp, "capture_date": date_of(leaf),
-                    "frame_count": fc, "total_size_bytes": sz,
-                    "is_generated_master": is_master})
+                os.path.getsize(os.path.join(camroot, f))
+                for f in real_files
+                if os.path.exists(os.path.join(camroot, f))
+            )
+            upsert(
+                {
+                    "library_id": library_id,
+                    "class": "dark",
+                    "folder_path": rel,
+                    "camera": camera,
+                    "scope": None,
+                    "temperature_c": temp,
+                    "gain": gain,
+                    "exp_s": exp,
+                    "capture_date": date_of(leaf),
+                    "frame_count": fc,
+                    "total_size_bytes": sz,
+                    "is_generated_master": is_master,
+                }
+            )
             n += 1
 
     # --- Flat: _Calibration Library/Flat/{Scope_Sensor}/{Flat ... date} ---
@@ -1466,11 +1653,22 @@ def ingest_calibration(con, library_id, root, obs, log):
                     obs["cal_empty"].append(os.path.relpath(sp, root))
                     continue
                 rel = os.path.relpath(sp, root)
-                upsert({"library_id": library_id, "class": "flat", "folder_path": rel,
-                        "camera": None, "scope": scope, "temperature_c": None, "gain": None,
-                        "exp_s": None, "capture_date": date_of(sub),
-                        "frame_count": fc, "total_size_bytes": sz,
-                        "is_generated_master": 1 if has_master_file(sp) else 0})
+                upsert(
+                    {
+                        "library_id": library_id,
+                        "class": "flat",
+                        "folder_path": rel,
+                        "camera": None,
+                        "scope": scope,
+                        "temperature_c": None,
+                        "gain": None,
+                        "exp_s": None,
+                        "capture_date": date_of(sub),
+                        "frame_count": fc,
+                        "total_size_bytes": sz,
+                        "is_generated_master": 1 if has_master_file(sp) else 0,
+                    }
+                )
                 n += 1
 
     con.commit()
@@ -1494,12 +1692,12 @@ def ingest_integrations(con, library_id, root, obs, log):
         """Resolve a session folder name to (session_id, scope, sensor) or None."""
         return cur.execute(
             "SELECT session_id, scope, sensor FROM sessions WHERE folder_path = ?",
-            (os.path.join(tname, sname),)).fetchone()
+            (os.path.join(tname, sname),),
+        ).fetchone()
 
     for tname in sorted(os.listdir(root)):
         tpath = os.path.join(root, tname)
-        if (tname.startswith((".", "_")) or tname in SKIP_TOPLEVEL
-                or not os.path.isdir(tpath)):
+        if tname.startswith((".", "_")) or tname in SKIP_TOPLEVEL or not os.path.isdir(tpath):
             continue
         intdir = os.path.join(tpath, "integrations")
         if not os.path.isdir(intdir):
@@ -1527,16 +1725,15 @@ def ingest_integrations(con, library_id, root, obs, log):
             if mode == "pinned":
                 avail_names = man["members"] or man["built_sessions"]
             else:
-                avail_names = resolve_auto_members(
-                    tpath, man["rig"], man["span"], man["exclude"])
+                avail_names = resolve_auto_members(tpath, man["rig"], man["span"], man["exclude"])
 
             # BUILT member names (what is actually in the current master).
             if man["built_sessions"]:
                 built_names = set(man["built_sessions"])
             elif mode == "pinned":
-                built_names = set(avail_names)   # legacy list = the stack
+                built_names = set(avail_names)  # legacy list = the stack
             else:
-                built_names = set()              # auto, not yet stacked
+                built_names = set()  # auto, not yet stacked
 
             # Resolve the union to session rows; track rigs of the AVAILABLE set.
             member_rows, missing, rigs = {}, [], set()
@@ -1551,8 +1748,9 @@ def ingest_integrations(con, library_id, root, obs, log):
             if missing:
                 obs["integration_missing_member"].append((rel, missing))
             avail_set = set(avail_names)
-            built_id_flags = {sid: (1 if sname in built_names else 0)
-                              for sid, sname in member_rows.items()}
+            built_id_flags = {
+                sid: (1 if sname in built_names else 0) for sid, sname in member_rows.items()
+            }
 
             # Derive scope/sensor and kind from the available members' rigs.
             if len(rigs) == 1:
@@ -1562,20 +1760,19 @@ def ingest_integrations(con, library_id, root, obs, log):
                 scope, sensor = None, None
                 derived_kind = "composite"
             if man["kind"] and man["kind"] != derived_kind:
-                obs["integration_kind_mismatch"].append(
-                    (rel, man["kind"], derived_kind))
+                obs["integration_kind_mismatch"].append((rel, man["kind"], derived_kind))
 
             # Results-folder file count for this integration.
             rfiles = 0
             rdir = os.path.join(ipath, f"{iname} Results")
             if os.path.isdir(rdir):
                 for _r, _d, _f in os.walk(rdir):
-                    rfiles += sum(1 for x in _f
-                                  if x != ".DS_Store" and not x.startswith("._"))
+                    rfiles += sum(1 for x in _f if x != ".DS_Store" and not x.startswith("._"))
 
             sessions_available = sum(1 for s in member_rows.values() if s in avail_set)
-            method = detect_method(ipath)   # PixInsight|PI Magic|other|None
-            cur.execute("""
+            method = detect_method(ipath)  # PixInsight|PI Magic|other|None
+            cur.execute(
+                """
                 INSERT INTO integrations(target_id, library_id, kind, folder_name,
                     folder_path, scope, sensor, span, version, session_count,
                     membership_mode, goal_hours, integration_method,
@@ -1598,21 +1795,39 @@ def ingest_integrations(con, library_id, root, obs, log):
                   stage_print=excluded.stage_print,
                   results_file_count=excluded.results_file_count,
                   astrobin_url=excluded.astrobin_url, updated_at=CURRENT_TIMESTAMP
-            """, (tp["target_id"], library_id, derived_kind, iname, rel, scope, sensor,
-                  man["span"], man["version"], sessions_available,
-                  mode, man["goal_hours"], method,
-                  2 if man["edited"] else 0, 2 if man["published"] else 0,
-                  2 if man["printed"] else 0, rfiles,
-                  next((e.get("url") for e in man["published"] if e.get("url")), None)))
-            iid = cur.execute("SELECT integration_id FROM integrations "
-                              "WHERE folder_path=?", (rel,)).fetchone()[0]
+            """,
+                (
+                    tp["target_id"],
+                    library_id,
+                    derived_kind,
+                    iname,
+                    rel,
+                    scope,
+                    sensor,
+                    man["span"],
+                    man["version"],
+                    sessions_available,
+                    mode,
+                    man["goal_hours"],
+                    method,
+                    2 if man["edited"] else 0,
+                    2 if man["published"] else 0,
+                    2 if man["printed"] else 0,
+                    rfiles,
+                    next((e.get("url") for e in man["published"] if e.get("url")), None),
+                ),
+            )
+            iid = cur.execute(
+                "SELECT integration_id FROM integrations " "WHERE folder_path=?", (rel,)
+            ).fetchone()[0]
             cur.execute("DELETE FROM integration_members WHERE integration_id=?", (iid,))
             for sid, in_build in built_id_flags.items():
-                cur.execute("INSERT OR IGNORE INTO integration_members"
-                            "(integration_id, session_id, in_build) VALUES(?,?,?)",
-                            (iid, sid, in_build))
-            insert_publications(cur, tp["target_id"], None, iid,
-                                man["published"], man["printed"])
+                cur.execute(
+                    "INSERT OR IGNORE INTO integration_members"
+                    "(integration_id, session_id, in_build) VALUES(?,?,?)",
+                    (iid, sid, in_build),
+                )
+            insert_publications(cur, tp["target_id"], None, iid, man["published"], man["printed"])
             n += 1
     con.commit()
     log(f"  {library_id}: {n} integrations")
@@ -1646,8 +1861,11 @@ def ingest_legacy_xlsx(con, xlsx_path, log):
             continue
         as_index = str(row[0])
         data = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}
-        cur.execute("""INSERT OR REPLACE INTO legacy_xlsx_rows(as_index, sheet_row_data)
-                       VALUES(?, ?)""", (as_index, json.dumps(data, default=str)))
+        cur.execute(
+            """INSERT OR REPLACE INTO legacy_xlsx_rows(as_index, sheet_row_data)
+                       VALUES(?, ?)""",
+            (as_index, json.dumps(data, default=str)),
+        )
         n += 1
     con.commit()
     log(f"  legacy xlsx: {n} rows ingested into legacy_xlsx_rows")
@@ -1665,7 +1883,7 @@ def validate(con, locations, obs, log):
     ingest walk collected (things with no row in the DB)."""
     cur = con.cursor()
     cur.execute("DELETE FROM validation_findings")
-    f = []   # (severity, code, scope, session_id, ref_path, message)
+    f = []  # (severity, code, scope, session_id, ref_path, message)
 
     def add(sev, code, scope, sid, ref, msg):
         f.append((sev, code, scope, sid, ref, msg))
@@ -1682,87 +1900,154 @@ def validate(con, locations, obs, log):
             FROM sessions WHERE NOT is_other_capture"""):
         total = lk + lr + fl + df + dk + bi
         if results > 0:
-            pass   # processed session: raws may be cleared but kept output
-                   # sits in the Results folder — a valid completed session
+            pass  # processed session: raws may be cleared but kept output
+            # sits in the Results folder — a valid completed session
         elif total == 0 and other == 0 and unp == 0:
-            add("error", "EMPTY_SESSION", "session", sid, fp,
-                "Session folder contains no image frames and no Results output.")
+            add(
+                "error",
+                "EMPTY_SESSION",
+                "session",
+                sid,
+                fp,
+                "Session folder contains no image frames and no Results output.",
+            )
         elif total == 0:
-            pass   # has DSLR raws or unparsed files — covered by UNPARSED_FITS
+            pass  # has DSLR raws or unparsed files — covered by UNPARSED_FITS
         elif lk + lr == 0:
-            add("warning", "EMPTY_LIGHTS", "session", sid, fp,
-                "Session has calibration frames but no light frames.")
+            add(
+                "warning",
+                "EMPTY_LIGHTS",
+                "session",
+                sid,
+                fp,
+                "Session has calibration frames but no light frames.",
+            )
 
     # Folder date vs frame capture dates; future dates; multi-night span.
-    for sid, fp, sdate in cur.execute(
-            "SELECT session_id, folder_path, session_date FROM sessions"):
+    for sid, fp, sdate in cur.execute("SELECT session_id, folder_path, session_date FROM sessions"):
         if sdate > today:
-            add("error", "FUTURE_DATE", "session", sid, fp,
-                f"Session date {sdate} is in the future.")
-        dmin, dmax, nlight, ndays = cur.execute("""
+            add(
+                "error",
+                "FUTURE_DATE",
+                "session",
+                sid,
+                fp,
+                f"Session date {sdate} is in the future.",
+            )
+        dmin, dmax, nlight, ndays = cur.execute(
+            """
             SELECT MIN(date(captured_at_utc)), MAX(date(captured_at_utc)),
                    COUNT(*), COUNT(DISTINCT date(captured_at_utc))
             FROM frames
             WHERE session_id=? AND frame_type='light'
-              AND captured_at_utc IS NOT NULL""", (sid,)).fetchone()
+              AND captured_at_utc IS NOT NULL""",
+            (sid,),
+        ).fetchone()
         if not nlight:
             continue
-        nxt = (datetime.date.fromisoformat(sdate)
-               + datetime.timedelta(days=1)).isoformat()
-        on_date = cur.execute("""SELECT COUNT(*) FROM frames
+        nxt = (datetime.date.fromisoformat(sdate) + datetime.timedelta(days=1)).isoformat()
+        on_date = cur.execute(
+            """SELECT COUNT(*) FROM frames
             WHERE session_id=? AND frame_type='light'
               AND date(captured_at_utc) IN (?, ?)""",
-                              (sid, sdate, nxt)).fetchone()[0]
+            (sid, sdate, nxt),
+        ).fetchone()[0]
         if on_date == 0:
             span = dmin if dmin == dmax else f"{dmin}..{dmax}"
-            add("error", "DATE_MISMATCH", "session", sid, fp,
-                f"Folder dated {sdate}, but its light frames were captured {span}.")
+            add(
+                "error",
+                "DATE_MISMATCH",
+                "session",
+                sid,
+                fp,
+                f"Folder dated {sdate}, but its light frames were captured {span}.",
+            )
         if ndays > 2:
-            add("warning", "MULTI_NIGHT_SPAN", "session", sid, fp,
+            add(
+                "warning",
+                "MULTI_NIGHT_SPAN",
+                "session",
+                sid,
+                fp,
                 f"Light frames span {ndays} calendar dates ({dmin}..{dmax}) — "
-                f"may include frames copied from other sessions.")
+                f"may include frames copied from other sessions.",
+            )
 
     # Unparsed FITS files inside an otherwise-ingested session.
     for sid, fp, n in cur.execute(
-            "SELECT session_id, folder_path, unparsed_file_count "
-            "FROM sessions WHERE unparsed_file_count > 0"):
-        add("warning", "UNPARSED_FITS", "session", sid, fp,
+        "SELECT session_id, folder_path, unparsed_file_count "
+        "FROM sessions WHERE unparsed_file_count > 0"
+    ):
+        add(
+            "warning",
+            "UNPARSED_FITS",
+            "session",
+            sid,
+            fp,
             f"{n} FITS-extension file(s) here did not match any known filename "
-            f"grammar — not counted in any total.")
+            f"grammar — not counted in any total.",
+        )
 
     # Scope / sensor not in the controlled vocabulary.
     for sid, fp, scope, sensor in cur.execute(
-            "SELECT session_id, folder_path, scope, sensor "
-            "FROM sessions WHERE NOT is_other_capture"):
+        "SELECT session_id, folder_path, scope, sensor " "FROM sessions WHERE NOT is_other_capture"
+    ):
         r = cur.execute("SELECT from_registry FROM scopes WHERE scope=?", (scope,)).fetchone()
         if r and not r[0]:
-            add("warning", "UNKNOWN_SCOPE", "session", sid, fp,
-                f"Scope '{scope}' is not in _organization/scope_values.")
+            add(
+                "warning",
+                "UNKNOWN_SCOPE",
+                "session",
+                sid,
+                fp,
+                f"Scope '{scope}' is not in _organization/scope_values.",
+            )
         r = cur.execute("SELECT from_registry FROM sensors WHERE sensor=?", (sensor,)).fetchone()
         if r and not r[0]:
-            add("warning", "UNKNOWN_SENSOR", "session", sid, fp,
-                f"Sensor '{sensor}' is not in _organization/sensor_values.")
+            add(
+                "warning",
+                "UNKNOWN_SENSOR",
+                "session",
+                sid,
+                fp,
+                f"Sensor '{sensor}' is not in _organization/sensor_values.",
+            )
 
     # Missing per-session notes.toml.
     for sid, fp in cur.execute(
-            "SELECT session_id, folder_path FROM sessions "
-            "WHERE NOT is_other_capture AND notes_toml_present = 0"):
-        add("info", "NOTES_MISSING", "session", sid, fp,
-            "No per-session notes.toml in this folder.")
+        "SELECT session_id, folder_path FROM sessions "
+        "WHERE NOT is_other_capture AND notes_toml_present = 0"
+    ):
+        add(
+            "info", "NOTES_MISSING", "session", sid, fp, "No per-session notes.toml in this folder."
+        )
 
     # notes.toml location not defined in locations.toml.
     for sid, fp, loc in cur.execute(
-            "SELECT session_id, folder_path, location_label "
-            "FROM sessions WHERE location_label IS NOT NULL"):
+        "SELECT session_id, folder_path, location_label "
+        "FROM sessions WHERE location_label IS NOT NULL"
+    ):
         if loc not in locations:
-            add("error", "LOCATION_UNKNOWN", "session", sid, fp,
-                f"notes.toml location '{loc}' is not defined in locations.toml.")
+            add(
+                "error",
+                "LOCATION_UNKNOWN",
+                "session",
+                sid,
+                fp,
+                f"notes.toml location '{loc}' is not defined in locations.toml.",
+            )
 
     # Non-v2 folder names directly under a deep-sky target.
     for rel in obs.get("unparsed_sessions", []):
-        add("warning", "UNPARSED_SESSION_NAME", "session", None, rel,
+        add(
+            "warning",
+            "UNPARSED_SESSION_NAME",
+            "session",
+            None,
+            rel,
             "Folder under a deep-sky target does not match the v2 session "
-            "naming grammar — it was not ingested as a session.")
+            "naming grammar — it was not ingested as a session.",
+        )
 
     # -------------------------------------------------------------- Tier 2 --
     # FITS-header cross-checks (one sampled light header per session).
@@ -1776,60 +2061,94 @@ def validate(con, locations, obs, log):
         # strip punctuation/case and the noise words manufacturers add to the
         # FITS INSTRUME string ("ZWO ...", "Canon EOS ...") so a compact folder
         # token like 'CanonR5' compares equal to INSTRUME 'Canon EOS R5'.
-        n = (re.sub(r"[^a-z0-9]", "", (s or "").lower())
-             .replace("zwo", "").replace("eos", ""))
+        n = re.sub(r"[^a-z0-9]", "", (s or "").lower()).replace("zwo", "").replace("eos", "")
         return INSTRUME_ALIASES.get(n, n)
 
     for sid, fp, sensor, instr in cur.execute(
-            "SELECT session_id, folder_path, sensor, fits_instrument "
-            "FROM sessions WHERE fits_instrument IS NOT NULL "
-            "  AND NOT is_other_capture"):
+        "SELECT session_id, folder_path, sensor, fits_instrument "
+        "FROM sessions WHERE fits_instrument IS NOT NULL "
+        "  AND NOT is_other_capture"
+    ):
         if norm_cam(sensor) != norm_cam(instr):
-            add("warning", "SENSOR_MISMATCH", "session", sid, fp,
-                f"Folder sensor '{sensor}' does not match FITS INSTRUME '{instr}'.")
+            add(
+                "warning",
+                "SENSOR_MISMATCH",
+                "session",
+                sid,
+                fp,
+                f"Folder sensor '{sensor}' does not match FITS INSTRUME '{instr}'.",
+            )
 
     for sid, fp, loc, lat, lon in cur.execute(
-            "SELECT session_id, folder_path, location_label, fits_site_lat, fits_site_lon "
-            "FROM sessions WHERE fits_site_lat IS NOT NULL "
-            "  AND fits_site_lon IS NOT NULL AND location_label IS NOT NULL"):
+        "SELECT session_id, folder_path, location_label, fits_site_lat, fits_site_lon "
+        "FROM sessions WHERE fits_site_lat IS NOT NULL "
+        "  AND fits_site_lon IS NOT NULL AND location_label IS NOT NULL"
+    ):
         site = locations.get(loc)
         if not site:
-            continue   # LOCATION_UNKNOWN already covers an undefined location
+            continue  # LOCATION_UNKNOWN already covers an undefined location
         dist = ((lat - site["lat"]) ** 2 + (lon - site["lon"]) ** 2) ** 0.5
-        if dist > 0.05:                       # ~5 km
-            add("warning", "LOCATION_COORD_MISMATCH", "session", sid, fp,
+        if dist > 0.05:  # ~5 km
+            add(
+                "warning",
+                "LOCATION_COORD_MISMATCH",
+                "session",
+                sid,
+                fp,
                 f"FITS coordinates ({lat:.3f}, {lon:.3f}) are ~{dist:.2f}° from "
-                f"the declared location '{loc}'.")
+                f"the declared location '{loc}'.",
+            )
 
     # -------------------------------------------------------------- Tier 3 --
     # Registry & calibration consistency.
     for (fn,) in cur.execute("SELECT folder_name FROM targets WHERE catalog='NCG'"):
-        add("error", "CATALOG_TYPO", "target", None, fn,
-            f"Target folder '{fn}' uses catalog 'NCG' — almost certainly a typo "
-            f"for 'NGC'.")
+        add(
+            "error",
+            "CATALOG_TYPO",
+            "target",
+            None,
+            fn,
+            f"Target folder '{fn}' uses catalog 'NCG' — almost certainly a typo " f"for 'NGC'.",
+        )
 
     reg_dir = astro_config.org_path("target folders")
     if os.path.isdir(reg_dir):
-        registry = {d for d in os.listdir(reg_dir)
-                    if not d.startswith((".", "!"))
-                    and os.path.isdir(os.path.join(reg_dir, d))}
-        main_folders = {r[0] for r in cur.execute(
-            "SELECT DISTINCT folder_name FROM targets")}
+        registry = {
+            d
+            for d in os.listdir(reg_dir)
+            if not d.startswith((".", "!")) and os.path.isdir(os.path.join(reg_dir, d))
+        }
+        main_folders = {r[0] for r in cur.execute("SELECT DISTINCT folder_name FROM targets")}
         for fn in sorted(main_folders - registry):
-            add("warning", "REGISTRY_MISSING", "registry", None, fn,
-                f"Target folder '{fn}' has no entry in "
-                f"_organization/target folders/.")
+            add(
+                "warning",
+                "REGISTRY_MISSING",
+                "registry",
+                None,
+                fn,
+                f"Target folder '{fn}' has no entry in " f"_organization/target folders/.",
+            )
         for fn in sorted(registry - main_folders):
-            add("info", "REGISTRY_ORPHAN", "registry", None, fn,
-                f"Registry entry '{fn}' has no matching target folder in the "
-                f"libraries.")
+            add(
+                "info",
+                "REGISTRY_ORPHAN",
+                "registry",
+                None,
+                fn,
+                f"Registry entry '{fn}' has no matching target folder in the " f"libraries.",
+            )
 
     for rel in obs.get("cal_empty", []):
-        add("info", "CAL_EMPTY", "calibration", None, rel,
-            "Calibration folder contains no frames.")
+        add("info", "CAL_EMPTY", "calibration", None, rel, "Calibration folder contains no frames.")
     for rel in obs.get("cal_badname", []):
-        add("warning", "CAL_NAMING", "calibration", None, rel,
-            "Flat calibration folder name is missing its Scope_Sensor token.")
+        add(
+            "warning",
+            "CAL_NAMING",
+            "calibration",
+            None,
+            rel,
+            "Flat calibration folder name is missing its Scope_Sensor token.",
+        )
 
     # Calibration folders vs the registry. Sessions are checked above
     # (UNKNOWN_SCOPE/UNKNOWN_SENSOR); a mistyped Bias/Dark camera folder or
@@ -1837,76 +2156,123 @@ def validate(con, locations, obs, log):
     # folder that isn't the registry sensor name can never match any light
     # in the coverage report.
     def in_registry(table, col, name):
-        r = cur.execute(f"SELECT from_registry FROM {table} WHERE {col}=?",
-                        (name,)).fetchone()
+        r = cur.execute(f"SELECT from_registry FROM {table} WHERE {col}=?", (name,)).fetchone()
         return bool(r and r[0])
 
     for cls, cam in cur.execute(
-            "SELECT DISTINCT class, camera FROM calibration_masters "
-            "WHERE class IN ('bias','dark') AND camera IS NOT NULL"):
+        "SELECT DISTINCT class, camera FROM calibration_masters "
+        "WHERE class IN ('bias','dark') AND camera IS NOT NULL"
+    ):
         if not in_registry("sensors", "sensor", cam):
-            add("warning", "CAL_UNKNOWN_CAMERA", "calibration", None,
+            add(
+                "warning",
+                "CAL_UNKNOWN_CAMERA",
+                "calibration",
+                None,
                 f"_Calibration Library/{cls.capitalize()}/{cam}",
-                f"Calibration camera folder '{cam}' is not in "
-                f"_organization/sensor_values.")
+                f"Calibration camera folder '{cam}' is not in " f"_organization/sensor_values.",
+            )
 
     seen_combos = set()
-    for (fp,) in cur.execute(
-            "SELECT folder_path FROM calibration_masters WHERE class='flat'"):
-        parts = fp.split("/")   # _Calibration Library/Flat/{Scope_Sensor}/{set}
+    for (fp,) in cur.execute("SELECT folder_path FROM calibration_masters WHERE class='flat'"):
+        parts = fp.split("/")  # _Calibration Library/Flat/{Scope_Sensor}/{set}
         if len(parts) < 4 or parts[2] in seen_combos:
             continue
         combo = parts[2]
         seen_combos.add(combo)
         if "_" not in combo:
-            continue   # CAL_NAMING above already flags the missing token
+            continue  # CAL_NAMING above already flags the missing token
         scope_tok, sensor_tok = combo.split("_", 1)
         ref = f"_Calibration Library/Flat/{combo}"
         if not in_registry("scopes", "scope", scope_tok):
-            add("warning", "CAL_UNKNOWN_SCOPE", "calibration", None, ref,
-                f"Flat combo scope '{scope_tok}' is not in "
-                f"_organization/scope_values.")
+            add(
+                "warning",
+                "CAL_UNKNOWN_SCOPE",
+                "calibration",
+                None,
+                ref,
+                f"Flat combo scope '{scope_tok}' is not in " f"_organization/scope_values.",
+            )
         if not in_registry("sensors", "sensor", sensor_tok):
-            add("warning", "CAL_UNKNOWN_CAMERA", "calibration", None, ref,
-                f"Flat combo sensor '{sensor_tok}' is not in "
-                f"_organization/sensor_values.")
+            add(
+                "warning",
+                "CAL_UNKNOWN_CAMERA",
+                "calibration",
+                None,
+                ref,
+                f"Flat combo sensor '{sensor_tok}' is not in " f"_organization/sensor_values.",
+            )
 
     # integrations — structural (from the walk)
     for rel in obs.get("integration_no_manifest", []):
-        add("warning", "INTEGRATION_NO_MANIFEST", "integration", None, rel,
-            "Integration folder has no integration.toml manifest — not tracked.")
+        add(
+            "warning",
+            "INTEGRATION_NO_MANIFEST",
+            "integration",
+            None,
+            rel,
+            "Integration folder has no integration.toml manifest — not tracked.",
+        )
     for rel, missing in obs.get("integration_missing_member", []):
-        add("error", "INTEGRATION_MISSING_MEMBER", "integration", None, rel,
-            f"integration.toml lists member session(s) that don't exist: "
-            f"{', '.join(missing)}.")
+        add(
+            "error",
+            "INTEGRATION_MISSING_MEMBER",
+            "integration",
+            None,
+            rel,
+            f"integration.toml lists member session(s) that don't exist: " f"{', '.join(missing)}.",
+        )
     for rel, declared, derived in obs.get("integration_kind_mismatch", []):
-        add("warning", "INTEGRATION_KIND_MISMATCH", "integration", None, rel,
-            f"integration.toml says kind='{declared}' but the members are "
-            f"'{derived}'.")
+        add(
+            "warning",
+            "INTEGRATION_KIND_MISMATCH",
+            "integration",
+            None,
+            rel,
+            f"integration.toml says kind='{declared}' but the members are " f"'{derived}'.",
+        )
 
     # integrations — from the DB
     for iid, fp, sc in cur.execute(
-            "SELECT integration_id, folder_path, session_count FROM integrations"):
+        "SELECT integration_id, folder_path, session_count FROM integrations"
+    ):
         if sc == 0:
-            add("error", "INTEGRATION_EMPTY", "integration", None, fp,
-                "Integration has no resolvable member sessions.")
+            add(
+                "error",
+                "INTEGRATION_EMPTY",
+                "integration",
+                None,
+                fp,
+                "Integration has no resolvable member sessions.",
+            )
     for iid, fp in cur.execute(
-            "SELECT integration_id, folder_path FROM integrations "
-            "WHERE kind='multi-session' AND session_count=1"):
-        add("warning", "INTEGRATION_SINGLE_MEMBER", "integration", None, fp,
+        "SELECT integration_id, folder_path FROM integrations "
+        "WHERE kind='multi-session' AND session_count=1"
+    ):
+        add(
+            "warning",
+            "INTEGRATION_SINGLE_MEMBER",
+            "integration",
+            None,
+            fp,
             "Multi-session integration has only one member — should it be a "
-            "single-session integration, or is a member missing?")
+            "single-session integration, or is a member missing?",
+        )
 
     # ------------------------------------------------------------------ write
     cur.executemany(
         "INSERT INTO validation_findings(severity,code,scope,session_id,ref_path,message)"
-        " VALUES(?,?,?,?,?,?)", f)
+        " VALUES(?,?,?,?,?,?)",
+        f,
+    )
     con.commit()
     by = {"error": 0, "warning": 0, "info": 0}
     for rec in f:
         by[rec[0]] = by.get(rec[0], 0) + 1
-    log(f"  validation: {len(f)} findings — "
-        f"{by['error']} error, {by['warning']} warning, {by['info']} info")
+    log(
+        f"  validation: {len(f)} findings — "
+        f"{by['error']} error, {by['warning']} warning, {by['info']} info"
+    )
     return by
 
 
@@ -1919,10 +2285,10 @@ def main():
     ap.add_argument("--db", default=os.path.join(here, "tracker.db"))
     ap.add_argument("--schema", default=os.path.join(here, "schema.sql"))
     ap.add_argument("--xlsx", default=None, help="path to the legacy tracker xlsx")
-    ap.add_argument("--config", default=None,
-                    help="path to config.toml (default: next to this script)")
-    ap.add_argument("--no-validate", action="store_true",
-                    help="skip the data-validation pass")
+    ap.add_argument(
+        "--config", default=None, help="path to config.toml (default: next to this script)"
+    )
+    ap.add_argument("--no-validate", action="store_true", help="skip the data-validation pass")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
@@ -1933,19 +2299,22 @@ def main():
     log(f"Tracker ingest — {datetime.datetime.now():%Y-%m-%d %H:%M}")
     libraries = astro_config.load_libraries(args.config)
     con = init_db(args.db, args.schema)
-    apply_migrations(con)        # upgrade an existing DB in place, no-op if fresh
+    apply_migrations(con)  # upgrade an existing DB in place, no-op if fresh
 
     # Record every configured library in the libraries table (mounted or not),
     # so library_id foreign keys always resolve.
     cur0 = con.cursor()
     for lib in libraries:
-        cur0.execute("""
+        cur0.execute(
+            """
             INSERT INTO libraries(library_id, label, root_path, role)
             VALUES(?,?,?,?)
             ON CONFLICT(library_id) DO UPDATE SET
               label=excluded.label, root_path=excluded.root_path,
               role=excluded.role
-        """, (lib["id"], lib["label"], lib["path"], lib["role"]))
+        """,
+            (lib["id"], lib["label"], lib["path"], lib["role"]),
+        )
     con.commit()
 
     # Vocabularies + locations come from the _organization folder, which sits
@@ -1958,9 +2327,14 @@ def main():
     locations = load_locations(astro_config.org_path("locations.toml"))
 
     # Structural observations the walk collects for the validate() pass.
-    obs = {"unparsed_sessions": [], "cal_empty": [], "cal_badname": [],
-           "integration_no_manifest": [], "integration_missing_member": [],
-           "integration_kind_mismatch": []}
+    obs = {
+        "unparsed_sessions": [],
+        "cal_empty": [],
+        "cal_badname": [],
+        "integration_no_manifest": [],
+        "integration_missing_member": [],
+        "integration_kind_mismatch": [],
+    }
 
     for lib in libraries:
         root = lib["path"]
@@ -1984,19 +2358,23 @@ def main():
 
     # Summary — report DB truth (distinct rows), not per-library operation counts.
     cur = con.cursor()
+
     def scalar(sql):
         v = cur.execute(sql).fetchone()[0]
         return v if v is not None else 0
+
     n_targets = scalar("SELECT COUNT(*) FROM targets")
     n_sessions = scalar("SELECT COUNT(*) FROM sessions")
-    n_other   = scalar("SELECT COUNT(*) FROM sessions WHERE is_other_capture")
-    n_frames  = scalar("SELECT COUNT(*) FROM frames")
-    n_cal     = scalar("SELECT COUNT(*) FROM calibration_masters")
-    n_integ   = scalar("SELECT COUNT(*) FROM integrations")
-    hours     = scalar("SELECT ROUND(SUM(integration_s)/3600.0,2) FROM sessions WHERE NOT is_other_capture")
-    kept      = scalar("SELECT COUNT(*) FROM frames WHERE frame_type='light' AND NOT is_rejected")
-    n_err     = scalar("SELECT COUNT(*) FROM validation_findings WHERE severity='error'")
-    n_warn    = scalar("SELECT COUNT(*) FROM validation_findings WHERE severity='warning'")
+    n_other = scalar("SELECT COUNT(*) FROM sessions WHERE is_other_capture")
+    n_frames = scalar("SELECT COUNT(*) FROM frames")
+    n_cal = scalar("SELECT COUNT(*) FROM calibration_masters")
+    n_integ = scalar("SELECT COUNT(*) FROM integrations")
+    hours = scalar(
+        "SELECT ROUND(SUM(integration_s)/3600.0,2) FROM sessions WHERE NOT is_other_capture"
+    )
+    kept = scalar("SELECT COUNT(*) FROM frames WHERE frame_type='light' AND NOT is_rejected")
+    n_err = scalar("SELECT COUNT(*) FROM validation_findings WHERE severity='error'")
+    n_warn = scalar("SELECT COUNT(*) FROM validation_findings WHERE severity='warning'")
     log("")
     log("=" * 60)
     log(f"  Targets (distinct):   {n_targets}")

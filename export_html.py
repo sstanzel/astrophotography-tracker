@@ -13,6 +13,7 @@ It is a snapshot — re-run after ingest.py to refresh.
 Usage:
     python3 export_html.py [--db PATH] [--out PATH]
 """
+
 import os, sys, sqlite3, argparse, json, datetime
 
 
@@ -36,33 +37,52 @@ def main():
         v = cur.execute(sql).fetchone()[0]
         return v if v is not None else 0
 
-    has_validation = cur.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' "
-        "AND name='validation_findings'").fetchone() is not None
-    has_integrations = cur.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' "
-        "AND name='integrations'").fetchone() is not None
+    has_validation = (
+        cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' " "AND name='validation_findings'"
+        ).fetchone()
+        is not None
+    )
+    has_integrations = (
+        cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' " "AND name='integrations'"
+        ).fetchone()
+        is not None
+    )
 
     data = {
         "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "kpis": {
-            "hours": scalar("SELECT ROUND(SUM(integration_s)/3600.0) FROM sessions WHERE NOT is_other_capture"),
+            "hours": scalar(
+                "SELECT ROUND(SUM(integration_s)/3600.0) FROM sessions WHERE NOT is_other_capture"
+            ),
             "deepSkySessions": scalar("SELECT COUNT(*) FROM sessions WHERE NOT is_other_capture"),
             "otherSessions": scalar("SELECT COUNT(*) FROM sessions WHERE is_other_capture"),
-            "targetsImaged": scalar("SELECT COUNT(DISTINCT target_id) FROM sessions WHERE lights_kept>0 AND NOT is_other_capture"),
-            "keptLights": scalar("SELECT COUNT(*) FROM frames WHERE frame_type='light' AND NOT is_rejected"),
+            "targetsImaged": scalar(
+                "SELECT COUNT(DISTINCT target_id) FROM sessions WHERE lights_kept>0 AND NOT is_other_capture"
+            ),
+            "keptLights": scalar(
+                "SELECT COUNT(*) FROM frames WHERE frame_type='light' AND NOT is_rejected"
+            ),
             "calSets": scalar("SELECT COUNT(*) FROM calibration_masters"),
             "calNeeds": scalar("""SELECT COUNT(*) FROM v_calibration_needs
                                   WHERE status IN ('no master','stale (new raw)','stale (age)')
                                     AND (class='dark' OR (class='bias' AND (SELECT require_bias
                                          FROM coverage_settings WHERE id=1)=1))"""),
-            "integrations": (scalar("SELECT COUNT(*) FROM integrations")
-                             if has_integrations else 0),
-            "unpublishedTargets": (scalar("SELECT COUNT(*) FROM v_targets_unpublished")
-                                   if has_integrations else 0),
-            "validationIssues": (scalar("SELECT COUNT(*) FROM validation_findings "
-                                        "WHERE severity IN ('error','warning')")
-                                 if has_validation else 0),
+            "integrations": (
+                scalar("SELECT COUNT(*) FROM integrations") if has_integrations else 0
+            ),
+            "unpublishedTargets": (
+                scalar("SELECT COUNT(*) FROM v_targets_unpublished") if has_integrations else 0
+            ),
+            "validationIssues": (
+                scalar(
+                    "SELECT COUNT(*) FROM validation_findings "
+                    "WHERE severity IN ('error','warning')"
+                )
+                if has_validation
+                else 0
+            ),
         },
         "byYear": rows("""SELECT substr(session_date,1,4) AS year, COUNT(*) AS sessions,
                                  ROUND(SUM(integration_s)/3600.0) AS hours
@@ -211,6 +231,7 @@ def main():
                        JOIN v_session_pipeline vp ON vp.session_id=s.session_id
                        WHERE NOT s.is_other_capture AND vp.furthest_stage='{stage}'
                        ORDER BY s.session_date DESC""")
+
     edit_rows = rows("""
         SELECT s.target_id, (s.session_date||'  '||s.scope||' '||s.sensor) AS image,
                'session' AS type, ROUND(s.integration_s/3600.0,2) AS hours,
@@ -301,8 +322,10 @@ def main():
     with open(args.out, "w") as f:
         f.write(html)
     print(f"Wrote {args.out}")
-    print(f"  {data['kpis']['deepSkySessions']} sessions · "
-          f"{data['kpis']['hours']} hours · {len(data['sessions'])} session rows")
+    print(
+        f"  {data['kpis']['deepSkySessions']} sessions · "
+        f"{data['kpis']['hours']} hours · {len(data['sessions'])} session rows"
+    )
 
 
 HTML_TEMPLATE = r"""<!DOCTYPE html>

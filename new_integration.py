@@ -25,17 +25,19 @@ skipping the separate mark_integrated.py step. Never use --built before stacking
 [built] means "physically in the current master", and prefilling it silences the
 Restack signal the empty list exists to raise.
 """
+
 import argparse
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import astro_config   # noqa: E402
+import astro_config  # noqa: E402
 
 SESSION_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9_+\-]+)\s+(?P<scope>\S+)\s+(?P<sensor>\S+)\s+"
-    r"(?P<date>\d{4}-\d{2}-\d{2})$")
+    r"(?P<date>\d{4}-\d{2}-\d{2})$"
+)
 
 
 def find_target(target_name, libraries):
@@ -112,7 +114,7 @@ def build_manifest(rig, span, goal_hours, built_sessions=None):
     if rig:
         lines.append(f'rig  = "{rig}"          # scope+sensor; omit for a composite')
     else:
-        lines.append('# rig omitted → composite (all rigs for this target/span)')
+        lines.append("# rig omitted → composite (all rigs for this target/span)")
     lines.append(f'span = "{span}"')
     if goal_hours is not None:
         lines.append(f"goal_hours = {goal_hours:g}")
@@ -143,24 +145,35 @@ def build_manifest(rig, span, goal_hours, built_sessions=None):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Scaffold a living multi-session integration folder + manifest.")
-    ap.add_argument("--target", required=True,
-                    help="target folder name, e.g. 'M 81 Bodes Galaxy'")
-    ap.add_argument("--span", required=True,
-                    help="'2026' | a range like '2024-2026' | 'all'")
-    ap.add_argument("--rig", default="",
-                    help="one rig 'scope sensor', e.g. 'RASA8 ASI2600MCAir'; "
-                         "omit for a composite across rigs")
-    ap.add_argument("--goal", type=float, default=None,
-                    help="integration-hours goal for the dashboard (e.g. 50)")
-    ap.add_argument("--built", action="store_true",
-                    help="retroactive scaffold: a master containing exactly today's "
-                         "matches already exists — also record them in [built] "
-                         "(instead of running mark_integrated.py after)")
-    ap.add_argument("--apply", action="store_true",
-                    help="actually create the folder (default: preview only)")
-    ap.add_argument("--config", default=None,
-                    help="path to config.toml (default: next to this script)")
+        description="Scaffold a living multi-session integration folder + manifest."
+    )
+    ap.add_argument("--target", required=True, help="target folder name, e.g. 'M 81 Bodes Galaxy'")
+    ap.add_argument("--span", required=True, help="'2026' | a range like '2024-2026' | 'all'")
+    ap.add_argument(
+        "--rig",
+        default="",
+        help="one rig 'scope sensor', e.g. 'RASA8 ASI2600MCAir'; "
+        "omit for a composite across rigs",
+    )
+    ap.add_argument(
+        "--goal",
+        type=float,
+        default=None,
+        help="integration-hours goal for the dashboard (e.g. 50)",
+    )
+    ap.add_argument(
+        "--built",
+        action="store_true",
+        help="retroactive scaffold: a master containing exactly today's "
+        "matches already exists — also record them in [built] "
+        "(instead of running mark_integrated.py after)",
+    )
+    ap.add_argument(
+        "--apply", action="store_true", help="actually create the folder (default: preview only)"
+    )
+    ap.add_argument(
+        "--config", default=None, help="path to config.toml (default: next to this script)"
+    )
     args = ap.parse_args()
 
     libraries = astro_config.load_libraries(args.config)
@@ -170,9 +183,11 @@ def main():
 
     members, rigs = select_members(tpath, args.span, args.rig)
     if not members:
-        sys.exit(f"No sessions matched span '{args.span}'"
-                 + (f" / rig '{args.rig}'" if args.rig else "")
-                 + f" under {args.target}.")
+        sys.exit(
+            f"No sessions matched span '{args.span}'"
+            + (f" / rig '{args.rig}'" if args.rig else "")
+            + f" under {args.target}."
+        )
 
     target_id = SESSION_RE.match(members[0]).group("target")
     kind = "multi-session" if args.rig or len(rigs) == 1 else "composite"
@@ -182,11 +197,12 @@ def main():
 
     print(f"Target      : {args.target}")
     print(f"Integration : {folder}   ({kind}, {len(rigs)} rig(s))")
-    print(f"Rule        : mode=auto, rig={args.rig or '(any)'}, span={args.span}"
-          + (f", goal={args.goal:g}h" if args.goal is not None else ""))
+    print(
+        f"Rule        : mode=auto, rig={args.rig or '(any)'}, span={args.span}"
+        + (f", goal={args.goal:g}h" if args.goal is not None else "")
+    )
     if args.built:
-        print("Built       : retroactive — today's matches will be recorded as "
-              "already stacked")
+        print("Built       : retroactive — today's matches will be recorded as " "already stacked")
     print(f"Matches today ({len(members)} sessions):")
     for ms in members:
         print(f"  {ms}")
@@ -195,26 +211,31 @@ def main():
         sys.exit(f"\nERROR: integration folder already exists:\n  {dest}")
 
     if not args.apply:
-        print(f"\nDRY RUN — nothing created. Re-run with --apply to create:\n"
-              f"  integrations/{folder}/  "
-              f"(PI Process/, PI Magic/, '{folder} Results/', integration.toml)")
+        print(
+            f"\nDRY RUN — nothing created. Re-run with --apply to create:\n"
+            f"  integrations/{folder}/  "
+            f"(PI Process/, PI Magic/, '{folder} Results/', integration.toml)"
+        )
         return
 
     os.makedirs(os.path.join(dest, "PI Process"))
     os.makedirs(os.path.join(dest, "PI Magic"))
     os.makedirs(os.path.join(dest, f"{folder} Results"))
     with open(os.path.join(dest, "integration.toml"), "w", encoding="utf-8") as fh:
-        fh.write(build_manifest(args.rig, args.span, args.goal,
-                                members if args.built else None))
+        fh.write(build_manifest(args.rig, args.span, args.goal, members if args.built else None))
 
     print(f"\nCreated: {dest}")
     if args.built:
-        print(f"Recorded {len(members)} session(s) in [built]. "
-              "Re-run ingest.py to update the tracker.")
+        print(
+            f"Recorded {len(members)} session(s) in [built]. "
+            "Re-run ingest.py to update the tracker."
+        )
     else:
-        print("Next: build it in PixInsight in that folder, then run\n"
-              f'  python3 mark_integrated.py "{dest}"\n'
-              "and re-run ingest.py.")
+        print(
+            "Next: build it in PixInsight in that folder, then run\n"
+            f'  python3 mark_integrated.py "{dest}"\n'
+            "and re-run ingest.py."
+        )
 
 
 if __name__ == "__main__":

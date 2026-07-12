@@ -13,6 +13,7 @@ walking folders that have no row in the database. Run ingest.py for those.
 Usage:
     python3 validate.py [--db PATH]
 """
+
 import argparse
 import os
 import sqlite3
@@ -27,9 +28,13 @@ import astro_config  # noqa: E402
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser(
-        description="Re-run the tracker data-validation pass against an existing DB.")
-    ap.add_argument("--db", default=os.path.join(here, "tracker.db"),
-                    help="path to tracker.db (default: next to this script)")
+        description="Re-run the tracker data-validation pass against an existing DB."
+    )
+    ap.add_argument(
+        "--db",
+        default=os.path.join(here, "tracker.db"),
+        help="path to tracker.db (default: next to this script)",
+    )
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
@@ -44,8 +49,7 @@ def main():
     print(f"Validating {args.db}")
     by = validate(con, locations, {}, print)
     print(f"\n{by['error']} errors, {by['warning']} warnings, {by['info']} info")
-    print("(UNPARSED_SESSION_NAME / CAL_EMPTY / CAL_NAMING run only in a full "
-          "ingest.py run.)")
+    print("(UNPARSED_SESSION_NAME / CAL_EMPTY / CAL_NAMING run only in a full " "ingest.py run.)")
     con.close()
 
 

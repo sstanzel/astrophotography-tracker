@@ -16,13 +16,14 @@ Used by every script that touches the libraries:
     libs = astro_config.load_libraries()          # [{'id','path','label','role'}]
     loc  = astro_config.org_path("locations.toml")
 """
+
 import os
 import re
 
 # This file lives in  {library}/_organization/tracker/ , so the
 # _organization folder is its parent directory and needs no configuration.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ORG_DIR = os.path.dirname(SCRIPT_DIR)                 # .../_organization
+ORG_DIR = os.path.dirname(SCRIPT_DIR)  # .../_organization
 DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "config.toml")
 
 VALID_ROLES = ("working", "archive")
@@ -47,7 +48,8 @@ def load_libraries(config_path=None):
         raise SystemExit(
             f"Config file not found:\n  {path}\n\n"
             f"Create it with one [[library]] block per capture library, e.g.\n"
-            f'  [[library]]\n  id   = "stream"\n  path = "/Volumes/.../My Library"')
+            f'  [[library]]\n  id   = "stream"\n  path = "/Volumes/.../My Library"'
+        )
 
     blocks = []
     current = None
@@ -73,22 +75,24 @@ def load_libraries(config_path=None):
     for i, b in enumerate(blocks):
         p = (b.get("path") or "").strip()
         if not p:
-            continue                                  # incomplete block, skip
+            continue  # incomplete block, skip
         lib_id = (b.get("id") or f"lib{i+1}").strip()
         role = (b.get("role") or "working").strip().lower()
         if role not in VALID_ROLES:
             role = "working"
-        libs.append({
-            "id": lib_id,
-            "path": p,
-            "label": (b.get("label") or lib_id).strip(),
-            "role": role,
-        })
+        libs.append(
+            {
+                "id": lib_id,
+                "path": p,
+                "label": (b.get("label") or lib_id).strip(),
+                "role": role,
+            }
+        )
 
     if not libs:
         raise SystemExit(
-            f"No usable [[library]] entries in {path} - "
-            f"each block needs at least a path.")
+            f"No usable [[library]] entries in {path} - " f"each block needs at least a path."
+        )
     return libs
 
 

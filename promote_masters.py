@@ -22,6 +22,7 @@ default; pass --apply to actually copy.
     python3 promote_masters.py --apply
     python3 promote_masters.py --only "M_51"    # limit to matching folders
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +32,7 @@ import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import astro_config   # noqa: E402
+import astro_config  # noqa: E402
 
 WORKING_FOLDERS = ("PI Process", "PI Magic")
 MASTER_EXTS = (".xisf", ".fit", ".fits", ".tif", ".tiff")
@@ -42,7 +43,8 @@ MASTER_EXTS = (".xisf", ".fit", ".fits", ".tif", ".tiff")
 # calibration masters, calibrated subs, plate-solve caches and weight images.
 MASTER_INCLUDE = re.compile(r"(stacked|masterlight)", re.I)
 MASTER_EXCLUDE = re.compile(
-    r"(rejection|master\s*dark|master\s*flat|master\s*bias|_cal_|_wcs|weight)", re.I)
+    r"(rejection|master\s*dark|master\s*flat|master\s*bias|_cal_|_wcs|weight)", re.I
+)
 
 
 def is_keeper(name: str) -> bool:
@@ -115,8 +117,7 @@ def iter_containers(library_root: str):
         if any(os.path.isdir(os.path.join(root, wf)) for wf in WORKING_FOLDERS):
             yield root
             # Don't descend into this container's own working/Results subtrees.
-            dirs[:] = [d for d in dirs
-                       if d not in WORKING_FOLDERS and d != f"{base} Results"]
+            dirs[:] = [d for d in dirs if d not in WORKING_FOLDERS and d != f"{base} Results"]
 
 
 def plan_copies(libraries, only: str | None):
@@ -152,11 +153,12 @@ def plan_copies(libraries, only: str | None):
 def main() -> None:
     """Preview or apply the master → Results copies across the libraries."""
     ap = argparse.ArgumentParser(
-        description="Copy keepers (integrated master + .psd) into Results folders.")
-    ap.add_argument("--only", default=None,
-                    help="limit to containers whose path contains this substring")
-    ap.add_argument("--apply", action="store_true",
-                    help="actually copy (default: preview only)")
+        description="Copy keepers (integrated master + .psd) into Results folders."
+    )
+    ap.add_argument(
+        "--only", default=None, help="limit to containers whose path contains this substring"
+    )
+    ap.add_argument("--apply", action="store_true", help="actually copy (default: preview only)")
     ap.add_argument("--config", default=None, help="path to config.toml")
     args = ap.parse_args()
 
@@ -175,8 +177,7 @@ def main() -> None:
         if not present:
             print(f"           into {rel}")
 
-    print(f"\n{len(pending)} keeper(s) to copy, "
-          f"{len(plan) - len(pending)} already in Results.")
+    print(f"\n{len(pending)} keeper(s) to copy, " f"{len(plan) - len(pending)} already in Results.")
     if not args.apply:
         print("DRY RUN — nothing copied. Re-run with --apply.")
         return
