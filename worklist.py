@@ -23,41 +23,45 @@ QUERIES = {
     "cull": ("Sessions to cull (captured, not yet reviewed)", """
         SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
                s.lights_kept AS lights, s.lights_rejected AS rejected,
-               s.integration_s/3600.0 AS hours
+               s.integration_s/3600.0 AS hours, s.library_id AS library
         FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
         WHERE NOT s.is_other_capture AND vp.furthest_stage='1 Captured'
         ORDER BY s.session_date DESC"""),
     "integrate": ("Sessions to integrate (culled, not yet stacked)", """
         SELECT s.target_id AS target, s.session_date AS date, s.scope, s.sensor,
-               s.lights_kept AS lights, s.integration_s/3600.0 AS hours
+               s.lights_kept AS lights, s.integration_s/3600.0 AS hours,
+               s.library_id AS library
         FROM sessions s
         JOIN v_session_pipeline vp ON vp.session_id=s.session_id
         WHERE NOT s.is_other_capture AND vp.furthest_stage='2 Culled'
         ORDER BY s.session_date DESC"""),
     "edit": ("Finished images to edit (integrated, not edited)", """
         SELECT s.target_id AS target, s.session_date||' '||s.scope||' '||s.sensor AS image,
-               'session' AS type, s.integration_s/3600.0 AS hours
+               'session' AS type, s.integration_s/3600.0 AS hours,
+               s.library_id AS library
         FROM sessions s
         WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
         UNION ALL
         SELECT i.target_id, i.folder_name, 'integration',
                (SELECT SUM(ss.integration_s)/3600.0 FROM integration_members im
                 JOIN sessions ss ON ss.session_id=im.session_id
-                WHERE im.integration_id=i.integration_id)
+                WHERE im.integration_id=i.integration_id),
+               i.library_id
         FROM integrations i WHERE i.stage_edit<2
         ORDER BY hours DESC"""),
     "restack": ("Integrations to restack (new data since last stack)", """
         SELECT target_id AS target, folder_name AS integration,
                built_hours AS built, available_hours AS available,
-               available_hours-built_hours AS behind
+               available_hours-built_hours AS behind, library_id AS library
         FROM v_integration_overview WHERE is_stale=1 ORDER BY behind DESC"""),
     "capture": ("Targets to capture more of (under goal, or planned)", """
         SELECT t.target_id AS target,
                COALESCE(SUM(s.integration_s),0)/3600.0 AS hours,
                g.goal_hours AS goal,
                g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0 AS gap,
-               g.priority
+               g.priority,
+               GROUP_CONCAT(DISTINCT s.library_id) AS library
         FROM targets t
         LEFT JOIN sessions s ON s.target_id=t.target_id AND NOT s.is_other_capture
         LEFT JOIN target_goals g ON g.target_id=t.target_id
@@ -68,7 +72,8 @@ QUERIES = {
     "masters": ("Calibration sets to turn into masters (bias/dark, no master; "
                 "bias skipped when the recipe doesn't require it)", """
         SELECT class, camera, temperature_c AS temperature, gain,
-               exp_s AS exposure, frame_count AS frames
+               exp_s AS exposure, frame_count AS frames,
+               library_id AS library
         FROM calibration_masters
         WHERE is_generated_master=0
           AND (class='dark' OR (class='bias' AND (SELECT require_bias

@@ -199,7 +199,8 @@ def main():
     def sess_at(stage):
         # stage is a trusted literal ('1 Captured' etc.), not user input.
         return rows(f"""SELECT s.target_id, t.common_name, s.scope, s.sensor,
-                              s.session_date, s.lights_kept AS lights,
+                              s.session_date, s.library_id AS library,
+                              s.lights_kept AS lights,
                               s.lights_rejected AS rejected,
                               ROUND(s.integration_s/3600.0,2) AS hours,
                               (SELECT COUNT(*) FROM frames f
@@ -213,13 +214,15 @@ def main():
     edit_rows = rows("""
         SELECT s.target_id, (s.session_date||'  '||s.scope||' '||s.sensor) AS image,
                'session' AS type, ROUND(s.integration_s/3600.0,2) AS hours,
-               COALESCE(s.integration_method,'') AS method
+               COALESCE(s.integration_method,'') AS method,
+               s.library_id AS library
         FROM sessions s JOIN targets t USING(target_id)
         WHERE NOT s.is_other_capture AND s.stage_integrate=2 AND s.stage_edit<2
         UNION ALL
         SELECT i.target_id, i.folder_name AS image, 'integration' AS type,
                ROUND(SUM(mem.integration_s)/3600.0,2) AS hours,
-               COALESCE(i.integration_method,'') AS method
+               COALESCE(i.integration_method,'') AS method,
+               i.library_id AS library
         FROM integrations i JOIN targets t USING(target_id)
         LEFT JOIN (SELECT im.integration_id, s.integration_s FROM integration_members im
                    JOIN sessions s ON s.session_id=im.session_id) mem
@@ -231,6 +234,7 @@ def main():
         "integrate": sess_at("2 Culled"),
         "edit": edit_rows,
         "restack": rows("""SELECT target_id, folder_name,
+                                  library_id AS library,
                                   COALESCE(built_hours,0) AS built_hours,
                                   COALESCE(available_hours,0) AS available_hours,
                                   ROUND(COALESCE(available_hours,0)-COALESCE(built_hours,0),2) AS behind
@@ -239,6 +243,8 @@ def main():
         "capture": rows("""
             SELECT t.target_id,
                    ROUND(COALESCE(SUM(s.integration_s),0)/3600.0,1) AS hours,
+                   -- a target's sessions can sit on both drives
+                   GROUP_CONCAT(DISTINCT s.library_id) AS library,
                    g.goal_hours AS goal,
                    ROUND(g.goal_hours-COALESCE(SUM(s.integration_s),0)/3600.0,1) AS gap,
                    g.priority
@@ -251,7 +257,8 @@ def main():
                 OR COUNT(s.session_id)=0
             ORDER BY g.priority, gap DESC"""),
         "masters": rows("""SELECT class, camera, temperature_c AS temp, gain,
-                                  exp_s AS exp, frame_count AS frames
+                                  exp_s AS exp, frame_count AS frames,
+                                  library_id AS library
                            FROM calibration_masters
                            WHERE is_generated_master=0
                              AND (class='dark' OR (class='bias' AND (SELECT require_bias
@@ -676,12 +683,12 @@ function sortableTable(tblEl, cols, data, opts){
 (function(){
   const WL = D.worklists || {};
   const SPEC = {
-    cull:      {label:"To cull",      cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rejected","num"],["qc_flags","QC flags","num"],["hours","Hours","num",r=>fmtHM(r.hours)]]},
-    integrate: {label:"To integrate", cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hours","num",r=>fmtHM(r.hours)]]},
-    edit:      {label:"To edit",      cols:[["target_id","Target"],["image","Image"],["type","Type"],["hours","Hours","num",r=>fmtHM(r.hours)],["method","Method"]]},
-    restack:   {label:"Restack",      cols:[["target_id","Target"],["folder_name","Integration"],["built_hours","Built","num",r=>fmtHM(r.built_hours)],["available_hours","Available","num",r=>fmtHM(r.available_hours)],["behind","Behind","num",r=>fmtHM(r.behind)]]},
-    capture:   {label:"Capture more", cols:[["target_id","Target"],["hours","Hours","num",r=>fmtH(r.hours)],["goal","Goal","num",r=>fmtH(r.goal)],["gap","Gap","num",r=>fmtH(r.gap)],["priority","Priority","num"]]},
-    masters:   {label:"Build masters",cols:[["class","Class"],["camera","Camera"],["temp","Temperature","num"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["frames","Frames","num"]]},
+    cull:      {label:"To cull",      cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["rejected","Rejected","num"],["qc_flags","QC flags","num"],["hours","Hours","num",r=>fmtHM(r.hours)],["library","Library"]]},
+    integrate: {label:"To integrate", cols:[["target_id","Target"],["session_date","Date"],["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],["hours","Hours","num",r=>fmtHM(r.hours)],["library","Library"]]},
+    edit:      {label:"To edit",      cols:[["target_id","Target"],["image","Image"],["type","Type"],["hours","Hours","num",r=>fmtHM(r.hours)],["method","Method"],["library","Library"]]},
+    restack:   {label:"Restack",      cols:[["target_id","Target"],["folder_name","Integration"],["built_hours","Built","num",r=>fmtHM(r.built_hours)],["available_hours","Available","num",r=>fmtHM(r.available_hours)],["behind","Behind","num",r=>fmtHM(r.behind)],["library","Library"]]},
+    capture:   {label:"Capture more", cols:[["target_id","Target"],["hours","Hours","num",r=>fmtH(r.hours)],["goal","Goal","num",r=>fmtH(r.goal)],["gap","Gap","num",r=>fmtH(r.gap)],["priority","Priority","num"],["library","Library"]]},
+    masters:   {label:"Build masters",cols:[["class","Class"],["camera","Camera"],["temp","Temperature","num"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["frames","Frames","num"],["library","Library"]]},
     coverage:  {label:"Calibration to shoot",cols:[["camera","Camera"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["subs","Light subs","num"],["hours","Hours","num",r=>fmtH(r.hours)],["dark_status","Dark"],["bias_status","Bias"]]},
   };
   const order = ["capture","coverage","masters","cull","integrate","restack","edit"];
