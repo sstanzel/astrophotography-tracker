@@ -1507,6 +1507,14 @@ def ingest_calibration(con, library_id, root, obs, log):
     n = 0
 
     def upsert(rec):
+        # A camera folder not (yet) in the registry must not crash the walk on
+        # the sensors FK — register it like session ingest does and let
+        # validate() flag it as CAL_UNKNOWN_CAMERA.
+        if rec.get("camera"):
+            cur.execute(
+                "INSERT OR IGNORE INTO sensors(sensor, is_imaging) VALUES(?, 1)",
+                (rec["camera"],),
+            )
         cur.execute(
             """
             INSERT INTO calibration_masters(library_id, class, folder_path, camera, scope,
@@ -2407,10 +2415,19 @@ def main():
     # Vocabularies + locations come from the _organization folder, which sits
     # next to these scripts — no library path needed.
     org = astro_config.ORG_DIR
-    if os.path.isdir(org):
+    if os.path.isdir(astro_config.org_path("sensor_values")):
         log("Vocabularies:")
         populate_vocabularies(con, org, log)
         populate_planned_targets(con, org, log)
+    else:
+        # The parent dir can exist without being the registry (e.g. the script
+        # running from a moved copy or a git worktree, where the positional
+        # discovery lands somewhere wrong) — say so loudly instead of quietly
+        # ingesting with an empty vocabulary.
+        log(
+            f"WARNING: no sensor_values/ under {org} — registry skipped "
+            f"(script running from a moved copy or git worktree?)"
+        )
     locations = load_locations(astro_config.org_path("locations.toml"))
 
     # Structural observations the walk collects for the validate() pass.
