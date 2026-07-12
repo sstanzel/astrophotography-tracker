@@ -130,6 +130,32 @@ python3 clean_processing.py --apply   # then empty PI Process/ + PI Magic/ scrat
 #   or use --promote to copy-then-clean in one pass
 ```
 
+## Where are a session's flats?
+
+The Sessions table (dashboard + xlsx) has a **Flats** column, recomputed every
+ingest: `here` (flat frames in the session folder — the convention), `with M_44`
+(a shared-flat night; the sibling session named in the cell holds the set — the
+xlsx "Flats Location" column has the full folder name), `library` (a set in
+`_Flat older/` or `_Calibration Library/Flat/` matches the rig within ±1 day),
+or `none` (no flats anywhere for that night+rig).
+
+On a shared-flat night, point the flat-less sessions at the holder in each
+one's `notes.toml`:
+
+```toml
+[calibration]
+flats = "M_44 Redcat51 ASI585MCPro 2026-02-09"   # session folder holding the set
+```
+
+Without a pointer the tracker still resolves the sibling automatically (same
+rig, same night, has flats) — the pointer just makes it explicit and survives
+renames of the detection logic.
+
+`file_flats.py` was the one-time pass (run 2026-07-12) that moved the legacy
+`_Flat older/` sets into their sessions and stamped the pointers; it stays
+runnable (preview by default, `--apply` to act) should another pile of
+by-date flat sets ever need filing.
+
 ## Recording publishes & prints
 
 No script — append a block to the session's or integration's `notes.toml` /
@@ -161,6 +187,7 @@ date  = "2026-05-12"
 | `promote_masters.py` | Copy keepers into `Results/` | `--apply`, `--only` |
 | `clean_processing.py` | Empty PI scratch folders (keeper-safe) | `--apply`, `--only`, `--promote` |
 | `populate_notes.py` | Back-fill moon/weather into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only` |
+| `file_flats.py` | File `_Flat older/` sets into their sessions + stamp shared-night pointers | `--apply` |
 | `ingest.py` | Scan → parse → SQLite only (no exports/mirror) | `--config`, `--no-validate`, `--quiet` |
 | `export_html.py` / `export_xlsx.py` | Regenerate one output from the DB | `--db`, `--out` |
 | `validate.py` | Re-run the validation pass against the existing DB | `--db` |

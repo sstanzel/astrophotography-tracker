@@ -23,6 +23,12 @@ culled        = false       # flip to true after blinking a night where every fr
                             # been integrated — so this flag exists only for the one case the
                             # files can't show: reviewed, and every frame kept.
 
+[calibration]
+# Shared-flat night: when this session's flats live in a sibling session's
+# folder (same rig, same night), name that session folder here. Leave ""
+# when the flats are in this folder — the tracker detects that on its own.
+flats = ""                  # e.g. "M_44 Redcat51 ASI585MCPro 2026-02-09"
+
 [sky]
 # Auto-computed from the session date and the location's coordinates.
 moon_phase        = ""      # e.g. "waxing gibbous"

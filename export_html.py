@@ -139,6 +139,13 @@ def main():
                                    ROUND(s.integration_s/3600.0,2) AS hours,
                                    COALESCE(s.integration_method,'') AS method,
                                    vp.furthest_stage AS stage,
+                                   -- 'with sibling' shows the sibling's target id: 'with M_44'
+                                   CASE s.flats_source
+                                     WHEN 'with sibling' THEN 'with '||
+                                       CASE WHEN instr(s.flats_ref,' ')>0
+                                            THEN substr(s.flats_ref,1,instr(s.flats_ref,' ')-1)
+                                            ELSE COALESCE(s.flats_ref,'?') END
+                                     ELSE COALESCE(s.flats_source,'') END AS flats,
                                    s.is_other_capture AS other
                             FROM sessions s JOIN targets t USING(target_id)
                             JOIN v_session_pipeline vp ON vp.session_id = s.session_id
@@ -444,7 +451,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="panel">
   <h2>Sessions</h2>
-  <div style="margin-bottom:10px"><input type="search" id="sfilter" placeholder="filter by target, scope, sensor..."></div>
+  <div style="margin-bottom:10px"><input type="search" id="sfilter" placeholder="filter by target, date, scope, sensor..."></div>
   <div class="scroll"><table id="sessionsTable"></table></div>
 </div>
 
@@ -849,7 +856,7 @@ function sortableTable(tblEl, cols, data, opts){
   const cols = [
     ["session_date","Date"],["target_id","Target ID"],["common_name","Name"],
     ["scope","Scope"],["sensor","Sensor"],["lights","Lights","num"],
-    ["rejected","Rejected","num"],["hours","Hours","num"],
+    ["rejected","Rejected","num"],["hours","Hours","num"],["flats","Flats"],
     ["stage","Stage"],["method","Method"],["library","Library"],
   ];
   let sortKey="session_date", sortDir=-1;
@@ -858,8 +865,7 @@ function sortableTable(tblEl, cols, data, opts){
     let rows = D.sessions.slice();
     if(filter){
       const f = filter.toLowerCase();
-      rows = rows.filter(r => (r.target_id+" "+r.common_name+" "+r.scope+" "+
-        r.sensor).toLowerCase().includes(f));
+      rows = rows.filter(r => cols.some(c => String(r[c[0]]??"").toLowerCase().includes(f)));
     }
     rows.sort((a,b)=>{
       const x=a[sortKey], y=b[sortKey];

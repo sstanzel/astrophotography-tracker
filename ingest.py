@@ -219,6 +219,7 @@ def read_notes_toml(session_path, session_name):
         moon_age_days=None,
         edited=False,
         culled=False,
+        flats_with=None,
         published=[],
         printed=[],
         todos=[],
@@ -248,6 +249,11 @@ def read_notes_toml(session_path, session_name):
     m = re.search(r"^moon_age_days\s*=\s*([0-9.]+)", txt, re.M)
     if m:
         out["moon_age_days"] = float(m.group(1))
+    # [calibration] flats = "<sibling session folder>" — shared-flat night
+    # pointer: this session's flats live in that sibling's folder.
+    m = re.search(r'^flats\s*=\s*"([^"]*)"', txt, re.M)
+    if m and m.group(1):
+        out["flats_with"] = m.group(1)
     # [future_processing] todo = [ "…", "…" ]  — reprocessing to-do items.
     am = re.search(r"(?ms)^\s*todo\s*=\s*\[(.*?)\]", txt)
     out["todos"] = re.findall(r'"([^"]*)"', am.group(1)) if am else []
@@ -487,6 +493,9 @@ SESSION_NEW_COLS = [
     ("stage_print", "INTEGER DEFAULT 0"),  # 6 Printed
     ("integration_method", "TEXT"),  # PixInsight|PI Magic|other
     ("astrobin_url", "TEXT"),
+    ("flats_source", "TEXT"),  # here|with sibling|library|none (derived)
+    ("flats_ref", "TEXT"),  # sibling session folder or library set path
+    ("flats_note_ref", "TEXT"),  # notes.toml [calibration] flats pointer
 ]
 
 # Columns added to the integrations table on an existing DB (no-op on a fresh
@@ -1413,7 +1422,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   stage_edit=?, stage_publish=?, stage_print=?, astrobin_url=?,
                   fits_site_lat=?, fits_site_lon=?, fits_instrument=?,
                   mount=?, location_label=?, bortle=?,
-                  moon_age_days=?, moon_phase_pct=?, notes_path=?,
+                  moon_age_days=?, moon_phase_pct=?, notes_path=?, flats_note_ref=?,
                   integration_method = CASE
                       WHEN ? IN ('PixInsight','PI Magic') THEN ?
                       ELSE COALESCE(integration_method, ?) END,
@@ -1449,6 +1458,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                     notes["moon_age_days"],
                     notes["moon_illumination"],
                     notes_rel,
+                    notes["flats_with"],
                     method,
                     method,
                     method,
@@ -1630,9 +1640,16 @@ def ingest_calibration(con, library_id, root, obs, log):
             )
             n += 1
 
-    # --- Flat: _Calibration Library/Flat/{Scope_Sensor}/{Flat ... date} ---
-    flat_root = os.path.join(cal_root, "Flat")
-    if os.path.isdir(flat_root):
+    # --- Flat: {Scope_Sensor}/{Flat ... date} sets, in either home ---
+    # _Calibration Library/Flat is the conventional spot; _Flat older is the
+    # legacy pile at the library root (the session walk skips it as a
+    # _-prefixed folder, so it is scanned here). Flat rows feed the sessions
+    # table's flats_source='library' resolution, not the coverage report
+    # (flats are per-session by design). The sensor token goes in the camera
+    # column, same as bias/dark sets.
+    for flat_root in (os.path.join(cal_root, "Flat"), os.path.join(root, "_Flat older")):
+        if not os.path.isdir(flat_root):
+            continue
         for combo in os.listdir(flat_root):
             if combo.startswith(".") or combo.startswith("!"):
                 continue
@@ -1642,6 +1659,7 @@ def ingest_calibration(con, library_id, root, obs, log):
             if "_" not in combo:
                 obs["cal_badname"].append(os.path.relpath(combodir, root))
             scope = combo.split("_", 1)[0] if "_" in combo else combo
+            sensor = combo.split("_", 1)[1] if "_" in combo else None
             for sub in os.listdir(combodir):
                 if sub.startswith(".") or "template" in sub.lower() or "example" in sub.lower():
                     continue
@@ -1658,7 +1676,7 @@ def ingest_calibration(con, library_id, root, obs, log):
                         "library_id": library_id,
                         "class": "flat",
                         "folder_path": rel,
-                        "camera": None,
+                        "camera": sensor,
                         "scope": scope,
                         "temperature_c": None,
                         "gain": None,
@@ -1674,6 +1692,65 @@ def ingest_calibration(con, library_id, root, obs, log):
     con.commit()
     log(f"  {library_id}: {n} calibration sets")
     return n
+
+
+def resolve_flats(con):
+    """Derive flats_source/flats_ref for every session: where do its flats live?
+
+    Resolution order, first match wins:
+      1. 'here'          — the session folder holds flat frames.
+      2. 'with sibling'  — the notes.toml [calibration] flats pointer, or a
+                           same-rig same-night session that holds flats.
+      3. 'library'       — a flat set in _Flat older / _Calibration Library
+                           for the same rig within ±1 day (next-morning flats
+                           carry the next civil date).
+      4. 'none'          — no flats found anywhere for this session.
+
+    Runs after all libraries are scanned (siblings can live in either library)
+    and recomputes every row, so nothing goes stale between ingests.
+
+    Args:
+        con: open SQLite connection; commits its own update.
+    """
+
+    def day_diff(a, b):
+        return abs((datetime.date.fromisoformat(a) - datetime.date.fromisoformat(b)).days)
+
+    cur = con.cursor()
+    sess = cur.execute("""SELECT session_id, scope, sensor, session_date, flats_count,
+                  flats_note_ref, folder_path FROM sessions""").fetchall()
+    siblings = {}  # (scope, sensor, date) -> [(flats_count, folder name), ...]
+    for _sid, scope, sensor, date, fc, _note, fp in sess:
+        siblings.setdefault((scope, sensor, date), []).append((fc, os.path.basename(fp)))
+    lib_sets = {}  # (scope, sensor) -> [(capture_date, folder_path), ...]
+    for scope, camera, cdate, fp in cur.execute(
+        """SELECT scope, camera, capture_date, folder_path FROM calibration_masters
+           WHERE class='flat' AND capture_date IS NOT NULL AND camera IS NOT NULL"""
+    ):
+        lib_sets.setdefault((scope, camera), []).append((cdate, fp))
+
+    updates = []
+    for sid, scope, sensor, date, fc, note, fp in sess:
+        me = os.path.basename(fp)
+        if fc > 0:
+            updates.append(("here", None, sid))
+        elif note:
+            updates.append(("with sibling", note, sid))
+        else:
+            sibs = [x for x in siblings[(scope, sensor, date)] if x[0] > 0 and x[1] != me]
+            near = [
+                (day_diff(cdate, date), cdate, p)
+                for cdate, p in lib_sets.get((scope, sensor), [])
+                if day_diff(cdate, date) <= 1
+            ]
+            if sibs:
+                updates.append(("with sibling", max(sibs)[1], sid))
+            elif near:
+                updates.append(("library", min(near)[2], sid))
+            else:
+                updates.append(("none", None, sid))
+    cur.executemany("UPDATE sessions SET flats_source=?, flats_ref=? WHERE session_id=?", updates)
+    con.commit()
 
 
 def ingest_integrations(con, library_id, root, obs, log):
@@ -2175,15 +2252,16 @@ def validate(con, locations, obs, log):
 
     seen_combos = set()
     for (fp,) in cur.execute("SELECT folder_path FROM calibration_masters WHERE class='flat'"):
-        parts = fp.split("/")  # _Calibration Library/Flat/{Scope_Sensor}/{set}
-        if len(parts) < 4 or parts[2] in seen_combos:
+        # _Calibration Library/Flat/{Scope_Sensor}/{set} or _Flat older/{Scope_Sensor}/{set}
+        parts = fp.split("/")
+        if len(parts) < 3 or parts[-2] in seen_combos:
             continue
-        combo = parts[2]
+        combo = parts[-2]
         seen_combos.add(combo)
         if "_" not in combo:
             continue  # CAL_NAMING above already flags the missing token
+        ref = "/".join(parts[:-1])
         scope_tok, sensor_tok = combo.split("_", 1)
-        ref = f"_Calibration Library/Flat/{combo}"
         if not in_registry("scopes", "scope", scope_tok):
             add(
                 "warning",
@@ -2345,6 +2423,10 @@ def main():
         ingest_library(con, lib["id"], root, obs, locations, log)
         ingest_calibration(con, lib["id"], root, obs, log)
         ingest_integrations(con, lib["id"], root, obs, log)
+
+    # Both libraries scanned — a session's flats may sit with a sibling in
+    # either one, so the flats-location pass runs after the loop.
+    resolve_flats(con)
 
     if os.path.isdir(org):
         populate_target_goals(con, org, log)

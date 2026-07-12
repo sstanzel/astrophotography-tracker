@@ -97,7 +97,8 @@ newest-set-per-(camera, gain/ISO) bias retention policy.
 
 Tracked in the paper; listed here so the backlog is one-stop:
 
-- Per-session flats vs a shared-by-date flat library.
+- ~~Per-session flats vs a shared-by-date flat library.~~ **Decided 2026-07-12:
+  per-session** — see the flats-with-sessions entry in Done.
 - Field-name target folders (e.g. widefield mosaics) vs per-member linking.
 - Whether to add temp/gain to session folder names.
 - AstroBin vs print: one pipeline stage or two (currently two: Published, Printed).
@@ -107,6 +108,19 @@ Tracked in the paper; listed here so the backlog is one-stop:
 
 ## Done
 
+- **Flats with sessions + Flats column (paper §11 question resolved)** — shipped
+  2026-07-12. Decision: flats are per-session everywhere; the shared-by-date flat
+  library is retired. `file_flats.py` (kept, preview-by-default) moved 83 legacy
+  `_Flat older/` sets (~166 GB) into their matching sessions (rig+date, ±1 day for
+  next-morning sets), stamped 53 shared-night sibling pointers
+  (`[calibration] flats = "<host session>"` in notes.toml — new template section),
+  deleted 2 MD5-verified duplicate sets, and left 2 orphans (2024-11-21 and
+  2026-03-27 Redcat51_ASI585MCPro) in `_Flat older/`. Tracker side:
+  `resolve_flats()` in ingest derives a per-session flats location
+  (`here` / `with sibling` / `library` / `none`) every ingest; shown as the
+  Sessions-table **Flats** column (dashboard + xlsx, which also gets Flats
+  Location). Ingest now scans `_Flat older/` flat sets into
+  `calibration_masters` (class `flat`, sensor in the camera column).
 - **Work Queue "see notes" marker** — shipped 2026-07-11, same day it was designed.
   Sessions with open `[future_processing]` to-dos show a `see notes` marker in the
   To cull / To integrate / To edit lists (dashboard + `worklist.py`), so a session

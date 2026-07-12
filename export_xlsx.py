@@ -112,8 +112,8 @@ def main():
     ws.title = "Sessions"
     # Column layout (1-indexed): A Library B TargetID C Catalog D CommonName
     # E Scope F Sensor G SessionDate H Year I Lights J Rejected K Flats
-    # L DarkFlats M Darks N Bias O Integration P Capture Q Blink R Calibrate
-    # S OtherCapture T FolderPath
+    # L FlatsSource M FlatsLocation N DarkFlats O Darks P Bias Q Integration
+    # then stages/URL/FolderPath
     s_headers = [
         "Library",
         "Target ID",
@@ -126,6 +126,8 @@ def main():
         "Lights",
         "Rejected",
         "Flats",
+        "Flats Source",
+        "Flats Location",
         "Dark Flats",
         "Darks",
         "Bias",
@@ -145,6 +147,7 @@ def main():
     for r in cur.execute("""
         SELECT s.library_id, s.target_id, t.catalog, t.common_name, s.scope, s.sensor,
                s.session_date, s.lights_kept, s.lights_rejected, s.flats_count,
+               s.flats_source, s.flats_ref,
                s.dark_flats_count, s.darks_count, s.bias_count,
                ROUND(s.integration_s/3600.0, 2) AS hrs,
                vp.furthest_stage AS stage, COALESCE(s.integration_method,'') AS method,
@@ -167,6 +170,8 @@ def main():
                 r["lights_kept"],
                 r["lights_rejected"],
                 r["flats_count"],
+                r["flats_source"] or "",
+                r["flats_ref"] or "",
                 r["dark_flats_count"],
                 r["darks_count"],
                 r["bias_count"],
@@ -183,17 +188,17 @@ def main():
                 r["folder_path"],
             ]
         )
-    write_sheet(ws, s_headers, s_rows, col_formats={8: "0", 15: "0.00"})
+    write_sheet(ws, s_headers, s_rows, col_formats={8: "0", 17: "0.00"})
     n = len(s_rows)
     # totals row with SUM formulas (bounded to data rows 2..n+1)
     tr = n + 2
     ws.cell(row=tr, column=1, value="TOTAL").font = BOLD_FONT
-    for col in (9, 10, 11, 12, 13, 14, 15):  # Lights..Integration
+    for col in (9, 10, 11, 14, 15, 16, 17):  # Lights..Integration (skip Flats Source/Location)
         L = get_column_letter(col)
         c = ws.cell(row=tr, column=col, value=f"=SUM({L}2:{L}{n+1})")
         c.font = BOLD_FONT
         c.fill = PatternFill("solid", start_color=TOTAL_BG)
-        if col == 15:
+        if col == 17:
             c.number_format = "0"
     for col in range(1, len(s_headers) + 1):
         ws.cell(row=tr, column=col).fill = PatternFill("solid", start_color=TOTAL_BG)
