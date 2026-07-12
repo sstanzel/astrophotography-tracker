@@ -493,8 +493,8 @@ SESSION_NEW_COLS = [
     ("stage_print", "INTEGER DEFAULT 0"),  # 6 Printed
     ("integration_method", "TEXT"),  # PixInsight|PI Magic|other
     ("astrobin_url", "TEXT"),
-    ("flats_source", "TEXT"),  # here|with sibling|library|none (derived)
-    ("flats_ref", "TEXT"),  # sibling session folder or library set path
+    ("flats_source", "TEXT"),  # here|with sibling|nearest|none (derived)
+    ("flats_ref", "TEXT"),  # sibling / nearest-prior session folder name
     ("flats_note_ref", "TEXT"),  # notes.toml [calibration] flats pointer
 ]
 
@@ -1654,8 +1654,15 @@ def resolve_flats(con):
     Resolution order, first match wins:
       1. 'here'          — the session folder holds flat frames.
       2. 'with sibling'  — the notes.toml [calibration] flats pointer, or a
-                           same-rig same-night session that holds flats.
-      3. 'none'          — no flats exist for this session.
+                           same-rig session holding flats on the same night or
+                           the next day (next-morning flats, the same ±1-day
+                           convention the one-time filing pass used).
+      3. 'nearest'       — no flats were shot for this session; flats_ref names
+                           the closest usable substitute: the most recent
+                           same-rig flat set strictly BEFORE the capture date.
+                           Later sets never match — dust/rotation state must
+                           predate the lights.
+      4. 'none'          — the rig has no flats on or before this date.
 
     Flats are per-session (decided 2026-07-12, paper §11) — there is no flat
     library to fall back on. Runs after all libraries are scanned (siblings can
@@ -1668,23 +1675,34 @@ def resolve_flats(con):
     cur = con.cursor()
     sess = cur.execute("""SELECT session_id, scope, sensor, session_date, flats_count,
                   flats_note_ref, folder_path FROM sessions""").fetchall()
-    siblings = {}  # (scope, sensor, date) -> [(flats_count, folder name), ...]
+    holders = {}  # (scope, sensor, date) -> [(flats_count, folder name), ...] with flats only
     for _sid, scope, sensor, date, fc, _note, fp in sess:
-        siblings.setdefault((scope, sensor, date), []).append((fc, os.path.basename(fp)))
+        if fc > 0:
+            holders.setdefault((scope, sensor, date), []).append((fc, os.path.basename(fp)))
+
+    def best_holder(scope, sensor, date, me):
+        cands = [x for x in holders.get((scope, sensor, date), []) if x[1] != me]
+        return max(cands)[1] if cands else None
 
     updates = []
     for sid, scope, sensor, date, fc, note, fp in sess:
         me = os.path.basename(fp)
         if fc > 0:
             updates.append(("here", None, sid))
-        elif note:
+            continue
+        if note:
             updates.append(("with sibling", note, sid))
+            continue
+        day_after = (datetime.date.fromisoformat(date) + datetime.timedelta(days=1)).isoformat()
+        sib = best_holder(scope, sensor, date, me) or best_holder(scope, sensor, day_after, me)
+        if sib:
+            updates.append(("with sibling", sib, sid))
+            continue
+        prior = [d for (sc, se, d) in holders if sc == scope and se == sensor and d < date]
+        if prior:
+            updates.append(("nearest", best_holder(scope, sensor, max(prior), me), sid))
         else:
-            sibs = [x for x in siblings[(scope, sensor, date)] if x[0] > 0 and x[1] != me]
-            if sibs:
-                updates.append(("with sibling", max(sibs)[1], sid))
-            else:
-                updates.append(("none", None, sid))
+            updates.append(("none", None, sid))
     cur.executemany("UPDATE sessions SET flats_source=?, flats_ref=? WHERE session_id=?", updates)
     con.commit()
 

@@ -121,10 +121,12 @@ CREATE TABLE sessions (
     integration_s       REAL DEFAULT 0.0,    -- summed exp_s for kept lights, only when unit=s
     -- where this session's flats live (derived every ingest by resolve_flats;
     -- flats are per-session, there is no flat library):
-    -- 'here' (in this folder) | 'with sibling' (a same-rig same-night session
-    -- holds the shared set) | 'none'
+    -- 'here' (in this folder) | 'with sibling' (a same-rig session on the same
+    -- night or the next day holds the shared set) | 'nearest' (none shot for
+    -- this session; flats_ref names the closest same-rig set BEFORE the capture
+    -- date — later sets never match) | 'none' (rig has no flats on/before date)
     flats_source        TEXT,
-    flats_ref           TEXT,                -- sibling session folder name when 'with sibling'
+    flats_ref           TEXT,                -- session folder holding the flats (sibling/nearest)
     flats_note_ref      TEXT,                -- notes.toml [calibration] flats pointer, verbatim
     -- session-level metadata (parsed from notes.rtf if filled in)
     mount               TEXT,

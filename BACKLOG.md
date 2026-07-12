@@ -134,6 +134,19 @@ Tracked in the paper; listed here so the backlog is one-stop:
 
 ## Done
 
+- **Closest-flat logic in `resolve_flats()`** — shipped 2026-07-12. Sibling
+  matching widened from same-date-only to same day **or the day after** (the
+  next-morning-flats ±1-day convention the retired `file_flats.py` pass used but
+  the runtime resolver never learned) — 10 sessions gained a `with sibling`
+  match. Sessions with no match get the new **`nearest`** status: `flats_ref`
+  names the most recent same-rig flat set strictly *before* the capture date
+  (later sets never match — dust/rotation state must predate the lights);
+  dashboard shows `nearest M_44 (5d prior)` with the day gap, xlsx passes
+  source/ref through verbatim. Distribution moved from 117 here / 58 with
+  sibling / 47 none to 117 / 68 / 32 nearest / 5 none (the 5: spotting scope,
+  Borealis, 6se R5, the Tsuchinshan-ATLAS one-off, and one 2024 CanonR5 night
+  whose only flats came 9 days later).
+
 - **Flats with sessions + Flats column (paper §11 question resolved)** — shipped
   2026-07-12. Decision: flats are per-session everywhere; the shared-by-date flat
   library is retired completely. `file_flats.py` (one-time; retired after running,

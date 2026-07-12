@@ -139,12 +139,21 @@ def main():
                                    ROUND(s.integration_s/3600.0,2) AS hours,
                                    COALESCE(s.integration_method,'') AS method,
                                    vp.furthest_stage AS stage,
-                                   -- 'with sibling' shows the sibling's target id: 'with M_44'
+                                   -- 'with sibling' shows the sibling's target id ('with M_44');
+                                   -- 'nearest' adds the day gap ('nearest M_44 (5d prior)') —
+                                   -- flats_ref is a session folder name ending in YYYY-MM-DD
                                    CASE s.flats_source
                                      WHEN 'with sibling' THEN 'with '||
                                        CASE WHEN instr(s.flats_ref,' ')>0
                                             THEN substr(s.flats_ref,1,instr(s.flats_ref,' ')-1)
                                             ELSE COALESCE(s.flats_ref,'?') END
+                                     WHEN 'nearest' THEN 'nearest '||
+                                       CASE WHEN instr(s.flats_ref,' ')>0
+                                            THEN substr(s.flats_ref,1,instr(s.flats_ref,' ')-1)
+                                            ELSE COALESCE(s.flats_ref,'?') END
+                                       ||' ('||CAST(julianday(s.session_date)
+                                               - julianday(substr(s.flats_ref,-10)) AS INTEGER)
+                                       ||'d prior)'
                                      ELSE COALESCE(s.flats_source,'') END AS flats,
                                    s.is_other_capture AS other
                             FROM sessions s JOIN targets t USING(target_id)
