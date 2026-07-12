@@ -30,8 +30,9 @@ import astro_config  # noqa: E402
 # deep-sky integration totals and v2 naming enforcement. Deliberately one
 # level deep: the science topics are top-level buckets, not Science/{topic}.
 # "Moon Daytime"/"Moon Nighttime" merge into "Moon" and the time-lapse bucket
-# folds into "Nightscapes" — the old names stay recognized until those two
-# library cleanups are done (work items in Things, 2026-07-10).
+# folds into "Nightscapes".
+# TODO(steve): drop the old names once the Moon + time-lapse library cleanups
+# (tracked in Things) land.
 OTHER_CAPTURE_FOLDERS = {
     "ASI EAA",
     "Asteroids Comets",
@@ -1640,8 +1641,8 @@ def ingest_calibration(con, library_id, root, obs, log):
             )
             n += 1
 
-    # No flat scan: flats are per-session (decided 2026-07-12, paper §11) and
-    # live in session folders, never in a calibration library.
+    # No flat scan: flats are per-session (paper §11) and live in session
+    # folders, never in a calibration library.
 
     con.commit()
     log(f"  {library_id}: {n} calibration sets")
@@ -1657,8 +1658,8 @@ def resolve_flats(con):
                            same-rig same-night session that holds flats.
       3. 'none'          — no flats exist for this session.
 
-    Flats are per-session (decided 2026-07-12, paper §11) — there is no flat
-    library to fall back on. Runs after all libraries are scanned (siblings can
+    Flats are per-session (paper §11) — there is no flat library to fall
+    back on. Runs after all libraries are scanned (siblings can
     live in either library) and recomputes every row, so nothing goes stale
     between ingests.
 

@@ -7,7 +7,7 @@ Read-only by default: never touches tracker.db or the staging folder. With
 folder from the registry when the library doesn't have it yet. The registry's
 `target folders/` is the single source of truth for target names: libraries
 carry no empty target folders; a folder appears in a library the first time a
-session for it is filed (design decided 2026-07-10).
+session for it is filed.
 
 Reuses the exact grammars ingest.py applies (SESSION_RE, parse_target_folder,
 fits_parser.parse), so a clean pre-flight means ingest will parse the session
