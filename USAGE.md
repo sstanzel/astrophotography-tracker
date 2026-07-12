@@ -155,6 +155,24 @@ renames of the detection logic.
 `_Flat older/` flat library into the session folders and stamped the pointers;
 the script was retired afterwards and lives in git history.)
 
+## Spring cleaning (the deep Data Health scrub)
+
+```bash
+python3 scrub.py                      # summary + every finding
+python3 scrub.py --summary            # check-by-check counts only
+python3 scrub.py --no-fs              # skip the cross-library disk pass
+```
+
+`ingest.py`'s built-in validation runs every refresh and checks *structure*
+(naming, dates, registry, manifests). `scrub.py` is the occasional physical:
+*consistency* anomalies inside well-formed sessions — mixed gain/exposure/
+binning, double-counted or scratch-folder frames, cooler runaway, total-loss
+nights, nested calibration sets, sessions duplicated across libraries.
+Read-only (never writes the DB or touches the libraries); run after a big
+filing pass, on the initial ingest of a new library, or a couple of times a
+season. Every check — both surfaces — is cataloged with severities and
+remedies in **CHECKS.md**. Exit code 1 when any error-severity finding exists.
+
 ## Recording publishes & prints
 
 No script — append a block to the session's or integration's `notes.toml` /
@@ -189,3 +207,4 @@ date  = "2026-05-12"
 | `ingest.py` | Scan → parse → SQLite only (no exports/mirror) | `--config`, `--no-validate`, `--quiet` |
 | `export_html.py` / `export_xlsx.py` | Regenerate one output from the DB | `--db`, `--out` |
 | `validate.py` | Re-run the validation pass against the existing DB | `--db` |
+| `scrub.py` | Deep Data Health scrub (consistency anomalies; see CHECKS.md) | `--summary`, `--no-fs`, `--db` |
