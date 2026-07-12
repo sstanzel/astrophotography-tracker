@@ -130,26 +130,46 @@ python3 clean_processing.py --apply   # then empty PI Process/ + PI Magic/ scrat
 #   or use --promote to copy-then-clean in one pass
 ```
 
-## Where are a session's flats?
+## Where are a session's flats? Which bias set matches?
 
 Flats are per-session — always in a session folder, never in a library. The
 Sessions table (dashboard + xlsx) has a **Flats** column, recomputed every
 ingest: `here` (flat frames in the session folder — the convention), `with M_44`
 (a shared-flat night; the sibling session named in the cell holds the set — the
-xlsx "Flats Location" column has the full folder name), or `none` (no flats
-exist for that night+rig).
+xlsx "Flats Location" column has the full folder name), `nearest M_44 (5d prior)`
+(no flats shot for this session; the closest same-rig set strictly *before* the
+capture date — dust/rotation state must predate the lights), or `none` (the rig
+has no flats on or before that date).
+
+Bias is the opposite — reusable and library-hosted — so the **Bias** column
+suggests the nearest match from `_Calibration Library/Bias`: the **newest** set
+for the session's camera + gain, any date (bias is time-stable; when you restack
+today you load the best bias you own now). Values: `master 2026-04-18` (the set
+holds a built master), `raws 2026-02-10` (raws on hand, master not built), or
+`none` (no matching set — also the answer when the session's gain has no set,
+e.g. a Gain80 night against a Gain0/100/200/252 library). The column is
+informational and ignores the `require_bias` recipe: it answers "if I want a
+bias, which one?" — the coverage panel still decides whether bias is *needed*.
 
 On a shared-flat night, point the flat-less sessions at the holder in each
-one's `notes.toml`:
+one's `notes.toml`; the `bias` key pins a session to a specific library set:
 
 ```toml
 [calibration]
 flats = "M_44 Redcat51 ASI585MCPro 2026-02-09"   # session folder holding the set
+bias  = "Bias/ASI2600MCAir/Gain100/2026-04-18"   # optional pin; else newest match
 ```
 
 Without a pointer the tracker still resolves the sibling automatically (same
 rig, same night, has flats) — the pointer just makes it explicit and survives
 renames of the detection logic.
+
+Both resolved matches are also stamped into each session's `notes.toml` as
+`[calibration] flats_match` / `bias_match` by `populate_notes.py` (usually via
+`refresh.py --notes`). Those two keys are tracker-owned: refreshed on every run
+from the last ingest's DB, and inserted when a file predates them. The
+`flats`/`bias` pointers are yours; the `*_match` lines are the tracker's answer
+— don't hand-edit them.
 
 (The one-time `file_flats.py` pass — run 2026-07-12 — moved the legacy
 `_Flat older/` flat library into the session folders and stamped the pointers;
@@ -203,7 +223,7 @@ date  = "2026-05-12"
 | `mark_integrated.py` | Record sessions stacked into a master | `<dir>`, `--apply`, `--clear` |
 | `promote_masters.py` | Copy keepers into `Results/` | `--apply`, `--only` |
 | `clean_processing.py` | Empty PI scratch folders (keeper-safe) | `--apply`, `--only`, `--promote` |
-| `populate_notes.py` | Back-fill moon/weather into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only` |
+| `populate_notes.py` | Back-fill moon/weather + stamp flats/bias matches into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only`, `--db` |
 | `ingest.py` | Scan → parse → SQLite only (no exports/mirror) | `--config`, `--no-validate`, `--quiet` |
 | `export_html.py` / `export_xlsx.py` | Regenerate one output from the DB | `--db`, `--out` |
 | `validate.py` | Re-run the validation pass against the existing DB | `--db` |

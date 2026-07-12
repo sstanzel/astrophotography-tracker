@@ -5,19 +5,26 @@ per-session notes.toml in the astrophotography libraries.
 
 What it fills
 -------------
-[sky]      moon_phase, moon_illumination, moon_age_days   (offline astronomy math)
-[weather]  temperature_c, humidity_pct, dewpoint_c, cloud_cover_pct,
-           wind_kph, pressure_hpa, conditions             (Open-Meteo archive API)
+[sky]         moon_phase, moon_illumination, moon_age_days (offline astronomy math)
+[weather]     temperature_c, humidity_pct, dewpoint_c, cloud_cover_pct,
+              wind_kph, pressure_hpa, conditions           (Open-Meteo archive API)
+[calibration] flats_match, bias_match                      (tracker.db, last ingest)
 
-It NEVER touches: location, allsky_logged, [weather].source, seeing,
-transparency, [allsky], [observation], [processing], [future_processing].
+It NEVER touches: location, allsky_logged, the [calibration] flats/bias hand
+pointers, [weather].source, seeing, transparency, [allsky], [observation],
+[processing], [future_processing].
 
 Idempotent
 ----------
-Only fields whose current value is "" get written. Re-running is safe, and any
-value you hand-correct is left alone. Moon fields and weather fields are written
-independently - if the weather API has no data for a recent night, the moon
-fields still get filled.
+Sky/weather: only fields whose current value is "" get written. Re-running is
+safe, and any value you hand-correct is left alone. Moon fields and weather
+fields are written independently - if the weather API has no data for a recent
+night, the moon fields still get filled.
+Calibration matches are the exception: flats_match/bias_match are tracker-owned
+and REFRESHED on every run (a new bias set or a filed flat changes the match),
+inserted into the [calibration] section if the file predates those keys. They
+come from tracker.db, so they reflect the last ingest; run ingest.py first (or
+accept refresh.py --notes's one-cycle lag). No tracker.db -> stamping is skipped.
 
 How the night window is found
 ------------------------------
@@ -418,6 +425,119 @@ def apply_updates(text, section_values):
 
 
 # =============================================================================
+# Calibration matches  (tracker.db -> [calibration] flats_match / bias_match)
+# =============================================================================
+CAL_MATCH_KEYS = ("flats_match", "bias_match")
+
+
+def _match_label(source, ref):
+    """Human-readable match value: 'here'/'none' stand alone; matched sources
+    carry their target ('with sibling: <session folder>', 'master: <library set>')."""
+    if not source:
+        return None
+    if source in ("here", "none"):
+        return source
+    return f"{source}: {ref}" if ref else source
+
+
+def load_calibration_matches(db_path):
+    """Read every session's resolved flat + bias match from tracker.db.
+
+    Args:
+        db_path: path to tracker.db (written by ingest.py).
+
+    Returns:
+        Dict of session folder name -> {"flats_match": str|None,
+        "bias_match": str|None}. Empty when the DB is missing (fresh clone,
+        ingest never run) or predates the bias columns.
+    """
+    if not os.path.isfile(db_path):
+        return {}
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute("""SELECT folder_path, flats_source, flats_ref, bias_source, bias_ref
+               FROM sessions""").fetchall()
+    except sqlite3.OperationalError:  # pre-bias-columns DB - re-run ingest first
+        return {}
+    finally:
+        con.close()
+    return {
+        os.path.basename(fp): {
+            "flats_match": _match_label(fsrc, fref),
+            "bias_match": _match_label(bsrc, bref),
+        }
+        for fp, fsrc, fref, bsrc, bref in rows
+    }
+
+
+def stamp_calibration(text, values):
+    """Write flats_match/bias_match into [calibration], creating the section or
+    keys when the notes file predates them. Unlike apply_updates, existing
+    values are OVERWRITTEN when the resolved match changes - these keys are
+    tracker-owned (the hand pointers flats/bias are never touched).
+
+    Args:
+        text: current notes.toml content.
+        values: {"flats_match": str|None, "bias_match": str|None}.
+
+    Returns:
+        (new_text, ['calibration.key="value"', ...] for keys actually changed).
+    """
+    wanted = {k: v for k, v in values.items() if k in CAL_MATCH_KEYS and v is not None}
+    if not wanted:
+        return text, []
+    lines = text.splitlines(keepends=True)
+    start = end = None  # [calibration] header index, next-section index
+    section = None
+    for idx, line in enumerate(lines):
+        sm = re.match(r"\s*\[(\w+)\]", line)
+        if not sm:
+            continue
+        if section == "calibration":
+            end = idx
+            break
+        section = sm.group(1)
+        if section == "calibration":
+            start = idx
+    changed = []
+    if start is None:
+        # File predates the [calibration] section entirely: append one.
+        block = ["\n", "[calibration]\n"]
+        for k in CAL_MATCH_KEYS:
+            if k in wanted:
+                block.append(f'{k} = "{wanted[k]}"\n')
+                changed.append(f'calibration.{k}="{wanted[k]}"')
+        return "".join(lines) + "".join(block), changed
+    if end is None:
+        end = len(lines)
+    seen = set()
+    for idx in range(start + 1, end):
+        fm = re.match(r'(\s*)(flats_match|bias_match)(\s*=\s*)"([^"]*)"(.*?)(\r?\n?)$', lines[idx])
+        if not fm:
+            continue
+        key = fm.group(2)
+        seen.add(key)
+        if key in wanted and fm.group(4) != wanted[key]:
+            lines[idx] = (
+                fm.group(1) + key + fm.group(3) + f'"{wanted[key]}"' + fm.group(5) + fm.group(6)
+            )
+            changed.append(f'calibration.{key}="{wanted[key]}"')
+    # keys the file doesn't have yet: insert at the section's end, above any
+    # blank lines that separate it from the next section
+    insert_at = end
+    while insert_at > start + 1 and lines[insert_at - 1].strip() == "":
+        insert_at -= 1
+    for k in CAL_MATCH_KEYS:
+        if k in wanted and k not in seen:
+            lines.insert(insert_at, f'{k} = "{wanted[k]}"\n')
+            insert_at += 1
+            changed.append(f'calibration.{k}="{wanted[k]}"')
+    return "".join(lines), changed
+
+
+# =============================================================================
 # Robust write  (network volumes occasionally reject a plain truncate-write)
 # =============================================================================
 def safe_write(path, text):
@@ -458,11 +578,21 @@ def main():
     ap.add_argument(
         "--config", default=None, help="path to config.toml (default: next to this script)"
     )
+    ap.add_argument(
+        "--db",
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker.db"),
+        help="tracker.db for calibration-match stamping (default: next to this script)",
+    )
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
     sites = load_locations(astro_config.org_path("locations.toml"))
     print(f"Loaded {len(sites)} sites from locations.toml: {', '.join(sites)}")
+    cal_matches = load_calibration_matches(args.db)
+    if cal_matches:
+        print(f"Loaded calibration matches for {len(cal_matches)} sessions from tracker.db")
+    else:
+        print("No tracker.db (or pre-bias schema) - skipping calibration-match stamping")
 
     notes = []
     for lib in astro_config.load_libraries(args.config):
@@ -479,7 +609,7 @@ def main():
         notes = [n for n in notes if args.only in n]
     print(f"Found {len(notes)} session notes.toml to process\n")
 
-    n_sky = n_weather = n_skipped_weather = n_loc_unknown = n_offdate = 0
+    n_sky = n_weather = n_cal = n_skipped_weather = n_loc_unknown = n_offdate = 0
     n_have_weather = 0  # already filled — API skipped
     n_write_fail = 0
     write_failed = []
@@ -542,6 +672,10 @@ def main():
                 time.sleep(API_PAUSE_S)
 
         new_text, filled = apply_updates(text, {"sky": sky_vals, "weather": weather_vals})
+        cal = cal_matches.get(session)
+        if cal:
+            new_text, cal_changed = stamp_calibration(new_text, cal)
+            filled += cal_changed
 
         if filled and not args.dry_run:
             if not safe_write(path, new_text):
@@ -556,6 +690,8 @@ def main():
             n_sky += 1
         if any(f.startswith("weather.") for f in filled):
             n_weather += 1
+        if any(f.startswith("calibration.") for f in filled):
+            n_cal += 1
 
         tag = "DRY " if args.dry_run else ""
         src = {
@@ -582,6 +718,7 @@ def main():
     print(f"\n{'DRY RUN - no files written' if args.dry_run else 'Done'}")
     print(f"  sessions with sky fields filled    : {n_sky}")
     print(f"  sessions with weather fields filled: {n_weather}")
+    print(f"  sessions with calibration matches stamped: {n_cal}")
     if n_have_weather:
         print(f"  sessions already had weather (skipped API): {n_have_weather}")
     if n_skipped_weather:

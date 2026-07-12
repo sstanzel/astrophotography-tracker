@@ -220,6 +220,7 @@ def read_notes_toml(session_path, session_name):
         edited=False,
         culled=False,
         flats_with=None,
+        bias_set=None,
         published=[],
         printed=[],
         todos=[],
@@ -254,6 +255,11 @@ def read_notes_toml(session_path, session_name):
     m = re.search(r'^flats\s*=\s*"([^"]*)"', txt, re.M)
     if m and m.group(1):
         out["flats_with"] = m.group(1)
+    # [calibration] bias = "<library set folder>" — hand override naming the
+    # bias set to use for this session (overrides resolve_bias's auto pick).
+    m = re.search(r'^bias\s*=\s*"([^"]*)"', txt, re.M)
+    if m and m.group(1):
+        out["bias_set"] = m.group(1)
     # [future_processing] todo = [ "…", "…" ]  — reprocessing to-do items.
     am = re.search(r"(?ms)^\s*todo\s*=\s*\[(.*?)\]", txt)
     out["todos"] = re.findall(r'"([^"]*)"', am.group(1)) if am else []
@@ -496,6 +502,9 @@ SESSION_NEW_COLS = [
     ("flats_source", "TEXT"),  # here|with sibling|nearest|none (derived)
     ("flats_ref", "TEXT"),  # sibling / nearest-prior session folder name
     ("flats_note_ref", "TEXT"),  # notes.toml [calibration] flats pointer
+    ("bias_source", "TEXT"),  # here|master|raws|none (derived)
+    ("bias_ref", "TEXT"),  # matched library set folder (calibration_masters)
+    ("bias_note_ref", "TEXT"),  # notes.toml [calibration] bias pointer
 ]
 
 # Columns added to the integrations table on an existing DB (no-op on a fresh
@@ -1423,6 +1432,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   fits_site_lat=?, fits_site_lon=?, fits_instrument=?,
                   mount=?, location_label=?, bortle=?,
                   moon_age_days=?, moon_phase_pct=?, notes_path=?, flats_note_ref=?,
+                  bias_note_ref=?,
                   integration_method = CASE
                       WHEN ? IN ('PixInsight','PI Magic') THEN ?
                       ELSE COALESCE(integration_method, ?) END,
@@ -1459,6 +1469,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                     notes["moon_illumination"],
                     notes_rel,
                     notes["flats_with"],
+                    notes["bias_set"],
                     method,
                     method,
                     method,
@@ -1496,6 +1507,14 @@ def ingest_calibration(con, library_id, root, obs, log):
     n = 0
 
     def upsert(rec):
+        # A camera folder not (yet) in the registry must not crash the walk on
+        # the sensors FK — register it like session ingest does and let
+        # validate() flag it as CAL_UNKNOWN_CAMERA.
+        if rec.get("camera"):
+            cur.execute(
+                "INSERT OR IGNORE INTO sensors(sensor, is_imaging) VALUES(?, 1)",
+                (rec["camera"],),
+            )
         cur.execute(
             """
             INSERT INTO calibration_masters(library_id, class, folder_path, camera, scope,
@@ -1704,6 +1723,91 @@ def resolve_flats(con):
         else:
             updates.append(("none", None, sid))
     cur.executemany("UPDATE sessions SET flats_source=?, flats_ref=? WHERE session_id=?", updates)
+    con.commit()
+
+
+def resolve_bias(con):
+    """Derive bias_source/bias_ref for every session: the nearest matching bias set.
+
+    Resolution order, first match wins:
+      1. 'here'    — the session folder holds bias frames (rare; parity with flats).
+      2. notes pointer — [calibration] bias names a library set folder; if it
+                   resolves to a scanned set, use that set (source per its
+                   master flag). An unresolvable pointer is ignored — likely a
+                   typo or a moved set — and resolution falls through to auto.
+      3. 'master'  — the newest library set (class='bias') matching the
+                   session's camera (= sensor) and primary light gain that
+                   holds a built master. A set with no readable gain matches
+                   any gain — same rule as v_light_calibration_coverage.
+      4. 'raws'    — same match, but no set with a master; raws await a build.
+      5. 'none'    — no matching bias data exists (e.g. PoseidonCPro, minicam8).
+
+    Deliberate differences from resolve_flats: bias is reusable and lives in
+    the _Calibration Library, so the match is a library set rather than a
+    sibling session; and 'newest' means newest by capture date REGARDLESS of
+    the session date — bias has no dust/rotation constraint, and when you
+    restack today you'd load the best bias you own now. The primary gain is
+    the session's most-common kept-light gain (a handful of sessions mix
+    gains; the minority gain is not separately matched). Runs every ingest,
+    recomputes every row, and ignores the require_bias recipe — the column
+    answers "if I want a bias, which one?", not "must I have one?".
+
+    Args:
+        con: open SQLite connection; commits its own update.
+    """
+    cur = con.cursor()
+    sets = cur.execute(
+        """SELECT camera, gain, COALESCE(capture_date,''), is_generated_master, folder_path
+           FROM calibration_masters WHERE class='bias'"""
+    ).fetchall()
+    # session -> most-common kept-light gain (ties broken by lower gain)
+    gains = dict(cur.execute("""SELECT session_id, gain FROM (
+                 SELECT f.session_id, f.gain,
+                        ROW_NUMBER() OVER (PARTITION BY f.session_id
+                                           ORDER BY COUNT(*) DESC, f.gain) AS rn
+                 FROM frames f
+                 WHERE f.frame_type='light' AND NOT f.is_rejected AND f.exp_unit='s'
+                 GROUP BY f.session_id, f.gain) WHERE rn=1""").fetchall())
+
+    def resolve_pointer(note):
+        """Match a hand pointer to a scanned set — exact path or trailing-path
+        form (with or without the '_Calibration Library/' prefix)."""
+        for _cam, _g, _date, master, fp in sets:
+            if fp == note or fp.endswith("/" + note):
+                return (master, fp)
+        return None
+
+    def newest(sensor, gain, want_master):
+        cands = [
+            (date, fp)
+            for cam, g, date, master, fp in sets
+            if cam == sensor
+            and (g is None or gain is None or g == gain)
+            and bool(master) == want_master
+        ]
+        return max(cands)[1] if cands else None
+
+    updates = []
+    for sid, sensor, bc, note in cur.execute(
+        "SELECT session_id, sensor, bias_count, bias_note_ref FROM sessions"
+    ).fetchall():
+        if bc > 0:
+            updates.append(("here", None, sid))
+            continue
+        pointed = resolve_pointer(note) if note else None
+        if pointed:
+            updates.append(("master" if pointed[0] else "raws", pointed[1], sid))
+            continue
+        ref = newest(sensor, gains.get(sid), want_master=True)
+        if ref:
+            updates.append(("master", ref, sid))
+            continue
+        ref = newest(sensor, gains.get(sid), want_master=False)
+        if ref:
+            updates.append(("raws", ref, sid))
+        else:
+            updates.append(("none", None, sid))
+    cur.executemany("UPDATE sessions SET bias_source=?, bias_ref=? WHERE session_id=?", updates)
     con.commit()
 
 
@@ -2311,10 +2415,19 @@ def main():
     # Vocabularies + locations come from the _organization folder, which sits
     # next to these scripts — no library path needed.
     org = astro_config.ORG_DIR
-    if os.path.isdir(org):
+    if os.path.isdir(astro_config.org_path("sensor_values")):
         log("Vocabularies:")
         populate_vocabularies(con, org, log)
         populate_planned_targets(con, org, log)
+    else:
+        # The parent dir can exist without being the registry (e.g. the script
+        # running from a moved copy or a git worktree, where the positional
+        # discovery lands somewhere wrong) — say so loudly instead of quietly
+        # ingesting with an empty vocabulary.
+        log(
+            f"WARNING: no sensor_values/ under {org} — registry skipped "
+            f"(script running from a moved copy or git worktree?)"
+        )
     locations = load_locations(astro_config.org_path("locations.toml"))
 
     # Structural observations the walk collects for the validate() pass.
@@ -2339,6 +2452,7 @@ def main():
     # Both libraries scanned — a session's flats may sit with a sibling in
     # either one, so the flats-location pass runs after the loop.
     resolve_flats(con)
+    resolve_bias(con)
 
     if os.path.isdir(org):
         populate_target_goals(con, org, log)

@@ -128,6 +128,18 @@ CREATE TABLE sessions (
     flats_source        TEXT,
     flats_ref           TEXT,                -- session folder holding the flats (sibling/nearest)
     flats_note_ref      TEXT,                -- notes.toml [calibration] flats pointer, verbatim
+    -- nearest matching bias set (derived every ingest by resolve_bias; unlike
+    -- flats, bias is reusable and lives in the _Calibration Library, so the
+    -- match is a library set, not a sibling session):
+    -- 'here' (session folder holds bias frames) | 'master' (newest matching
+    -- camera+gain set holding a built master — any date, bias is time-stable,
+    -- so the newest set is what you'd load when stacking today) | 'raws'
+    -- (matching set on hand, master not built) | 'none' (no matching bias data).
+    -- Informational regardless of the require_bias recipe: the column answers
+    -- "if I want a bias, which one?" — the recipe answers "must I have one?".
+    bias_source         TEXT,
+    bias_ref            TEXT,                -- library set folder (calibration_masters.folder_path)
+    bias_note_ref       TEXT,                -- notes.toml [calibration] bias pointer, verbatim
     -- session-level metadata (parsed from notes.rtf if filled in)
     mount               TEXT,
     location_label      TEXT,

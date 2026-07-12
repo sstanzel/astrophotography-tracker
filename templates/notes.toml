@@ -28,6 +28,14 @@ culled        = false       # flip to true after blinking a night where every fr
 # folder (same rig, same night), name that session folder here. Leave ""
 # when the flats are in this folder — the tracker detects that on its own.
 flats = ""                  # e.g. "M_44 Redcat51 ASI585MCPro 2026-02-09"
+# Bias override: name a _Calibration Library set folder to pin this session
+# to a specific bias set. Leave "" — the tracker suggests the newest matching
+# camera+gain set on its own.
+bias = ""                   # e.g. "Bias/ASI2600MCAir/Gain100/2026-04-18"
+# Resolved matches — auto (stamped by populate_notes.py / refresh.py --notes
+# from the last ingest; refreshed every run, do not hand-edit).
+flats_match = ""            # e.g. "with sibling: M_44 Redcat51 ASI585MCPro 2026-02-09"
+bias_match = ""             # e.g. "master: _Calibration Library/Bias/ASI2600MCAir/Gain100/2026-04-18"
 
 [sky]
 # Auto-computed from the session date and the location's coordinates.

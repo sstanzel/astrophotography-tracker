@@ -49,6 +49,21 @@ edit. Two standing exceptions:
 - Pill/fill colors: green for fine, soft amber/yellow for work-to-do,
   red **only** for errors. A queue of chores is not an alarm.
 
+## Match columns (Flats / Bias on the Sessions table)
+
+Where a session's calibration lives is a lowercase phrase, not a status pill:
+
+- **Flats** — `here` · `with M_44` · `nearest M_44 (5d prior)` · `none`.
+  Sibling/nearest cells name the holder session by its target id; the xlsx
+  Flats Source + Flats Location columns carry the raw value and full folder.
+- **Bias** — `here` · `master 2026-04-18` · `raws 2026-02-10` · `none`.
+  Matched cells carry the library set's date (camera and gain are already the
+  row's sensor and the night's gain); the xlsx Bias Source + Bias Location
+  columns carry the raw value and full set path.
+
+The notes.toml `flats_match`/`bias_match` twins spell the same answer out in
+full: `with sibling: <session folder>`, `master: <library set path>`.
+
 ## Exposure seconds
 
 - Drop the decimals when they are zero: `300`, not `300.0`.
