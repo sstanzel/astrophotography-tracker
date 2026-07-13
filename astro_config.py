@@ -17,6 +17,7 @@ Used by every script that touches the libraries:
     loc  = astro_config.org_path("locations.toml")
 """
 
+import datetime
 import os
 import re
 
@@ -33,6 +34,37 @@ def org_path(*parts):
     """Build a path inside the _organization folder.
     e.g. org_path('locations.toml'), org_path('target folders')."""
     return os.path.join(ORG_DIR, *parts)
+
+
+def log_actions(script: str, lines: list[str]) -> None:
+    """Append an --apply run's actions to the shared action log.
+
+    Every mutating script (file_masters, promote_masters, clean_processing,
+    preflight) records what it actually did - one line per move/rename/copy/
+    delete - to `_organization/dev/actions.log`, so "what touched my files?"
+    is answerable after the terminal scrollback is gone. Append-only plain
+    text; actions are rare, so the file grows by a few hundred bytes per run
+    and is safe to delete at any time.
+
+    Args:
+        script: the calling script's name, e.g. 'file_masters'.
+        lines: one already-formatted line per performed action. When empty
+            (a preview, or an --apply that found nothing to do) nothing is
+            written.
+    """
+    if not lines:
+        return
+    # A logging failure must never block the file operations it describes.
+    try:
+        log_path = org_path("dev", "actions.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(f"==== {stamp} {script} --apply\n")
+            for line in lines:
+                fh.write(f"  {line}\n")
+    except OSError as exc:
+        print(f"  WARN    could not write {log_path}: {exc}")
 
 
 def load_libraries(config_path=None):

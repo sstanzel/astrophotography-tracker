@@ -158,6 +158,26 @@ python3 clean_processing.py --apply   # then empty PI Process/ + PI Magic/ scrat
 #   or use --promote to copy-then-clean in one pass
 ```
 
+## The action log (what did an --apply actually do?)
+
+Every mutating script — `file_masters.py`, `promote_masters.py`,
+`clean_processing.py`, `preflight.py` — appends what its `--apply` run did
+(one line per move / rename / copy / delete, with full paths) to
+
+    _organization/dev/actions.log
+
+Previews and no-op applies write nothing. Append-only plain text, a few
+hundred bytes per run — safe to delete whenever; grep it to answer "what
+touched my files?" after the terminal scrollback is gone:
+
+```bash
+grep masterDark "../dev/actions.log"      # from the tracker folder
+```
+
+Note the arrows in printed output and the log are `→` (U+2192), never ASCII
+`->` — a pasted `->` line acts as a shell redirection and creates a stray
+empty file named like the destination (the 2026-07-12 incident).
+
 ## Where are a session's flats? Which bias set matches?
 
 Flats are per-session — always in a session folder, never in a library. The
@@ -257,3 +277,7 @@ date  = "2026-05-12"
 | `export_html.py` / `export_xlsx.py` | Regenerate one output from the DB | `--db`, `--out` |
 | `validate.py` | Re-run the validation pass against the existing DB | `--db` |
 | `scrub.py` | Deep Data Health scrub (consistency anomalies; see CHECKS.md) | `--summary`, `--no-fs`, `--db` |
+
+The four mutating scripts (`preflight`, `file_masters`, `promote_masters`,
+`clean_processing`) log every `--apply` action to `_organization/dev/actions.log`
+(see "The action log" above).

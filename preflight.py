@@ -149,7 +149,7 @@ def check_session(
     lookup_tok = target_tok
     if target_tok.lower().endswith(ADJACENT_SUFFIX):
         lookup_tok = target_tok[: -len(ADJACENT_SUFFIX)]
-    suffix_note = " (adjacent-field session -> base target)" if lookup_tok != target_tok else ""
+    suffix_note = " (adjacent-field session → base target)" if lookup_tok != target_tok else ""
     tfolder = targets.get(lookup_tok)
     if tfolder is not None:
         dest = tfolder
@@ -288,6 +288,7 @@ def main() -> None:
     )
 
     n_err = n_warn = n_filed = 0
+    log_lines: list[str] = []
     entries = sorted(
         d
         for d in os.listdir(args.staging)
@@ -311,12 +312,16 @@ def main() -> None:
 
         if args.apply and dest and not errors and (not warnings or args.force):
             tdir = os.path.join(args.library, dest)
-            os.makedirs(tdir, exist_ok=True)
+            if not os.path.isdir(tdir):
+                os.makedirs(tdir)
+                log_lines.append(f"mkdir '{tdir}'")
             shutil.move(spath, os.path.join(tdir, sname))
+            log_lines.append(f"move '{spath}' → '{os.path.join(tdir, sname)}'")
             targets[parse_target_folder(dest)["target_id"]] = dest
             n_filed += 1
-            print(f"    FILED -> {dest}/{sname}")
+            print(f"    FILED → {dest}/{sname}")
 
+    astro_config.log_actions("preflight", log_lines)
     summary = f"\n{len(entries)} folder(s): {n_err} error(s), {n_warn} warning(s)"
     if args.apply:
         summary += f", {n_filed} filed"
