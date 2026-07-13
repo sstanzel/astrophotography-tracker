@@ -32,6 +32,7 @@ import tomllib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import astro_config  # noqa: E402
+import intake_scan  # noqa: E402
 
 VALID_LAYOUTS = ("asiair", "nina")
 VALID_HASHES = ("sha256", "sha1", "md5")
@@ -285,6 +286,115 @@ def show_config(cfg: dict, config_path: str) -> None:
 
 
 # ==========================================================================
+# --census
+# ==========================================================================
+def _gb(n_bytes: int) -> str:
+    return f"{n_bytes / 1e9:,.1f} GB"
+
+
+def _census_equation(scan: dict) -> tuple[str, int]:
+    """The census invariant for one scanned source.
+
+    Returns:
+        (equation line, remainder) — remainder must be 0; anything else means
+        a file got zero or two dispositions, which is a bug in the scanner.
+    """
+    parts = [
+        (len(scan["science"]), "science"),
+        (len(scan["logs"]), "logs"),
+        (len(scan["non_science"]), "non-science"),
+        (len(scan["ignored"]), "ignored"),
+        (len(scan["junk"]), "junk"),
+        (len(scan["quarantine"]), "quarantine"),
+    ]
+    remainder = scan["scanned"] - sum(n for n, _ in parts)
+    eq = " + ".join(f"{n:,} {label}" for n, label in parts)
+    return f"census {scan['scanned']:,} = {eq} · remainder {remainder}", remainder
+
+
+def _grouped_counter(records: list[dict], key) -> list[tuple[str, int]]:
+    """Count records by a key function, most-common first."""
+    counts: dict[str, int] = {}
+    for rec in records:
+        counts[key(rec)] = counts.get(key(rec), 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+def render_census(source: dict, scan: dict, verbose: bool) -> int:
+    """Print one source's census block; return the equation remainder."""
+    print(f"\n[{source['id']}] {source['label']} — layout {source['layout']}")
+    print(f"  scanned {scan['scanned']:,} files · {_gb(scan['bytes'])}")
+
+    science = scan["science"]
+    if science:
+        kinds = " · ".join(f"{k} {n:,}" for k, n in _grouped_counter(science, lambda r: r["kind"]))
+        grammars = ", ".join(
+            f"{g} {n:,}" for g, n in _grouped_counter(science, lambda r: r["grammar"])
+        )
+        cameras = ", ".join(
+            f"{c} {n:,}" for c, n in _grouped_counter(science, lambda r: r["cam"])
+        )
+        nights = sorted({r["night"] for r in science})
+        print(f"  science {len(science):,}: {kinds}")
+        print(f"    grammars: {grammars}")
+        print(f"    cameras : {cameras}")
+        print(f"    nights  : {len(nights)} ({nights[0]} → {nights[-1]})")
+    else:
+        print("  science 0")
+
+    print(
+        f"  logs {len(scan['logs']):,} · non-science {len(scan['non_science']):,} · "
+        f"ignored {len(scan['ignored']):,} · junk {len(scan['junk']):,} · "
+        f"quarantine {len(scan['quarantine']):,}"
+    )
+    if scan["pruned_dirs"]:
+        print(f"  pruned dirs (never entered): {', '.join(scan['pruned_dirs'])}")
+
+    for rec in scan["quarantine"] if verbose else []:
+        print(f"    quarantine: {rec['relpath']} — {rec.get('reason', '?')}")
+    if scan["quarantine"] and not verbose:
+        by_dir = _grouped_counter(
+            scan["quarantine"], lambda r: os.path.dirname(r["relpath"]) or "."
+        )
+        for d, n in by_dir:
+            example = next(
+                os.path.basename(r["relpath"])
+                for r in scan["quarantine"]
+                if (os.path.dirname(r["relpath"]) or ".") == d
+            )
+            print(f"    quarantine: {d}/ — {n:,} file(s), e.g. {example}")
+    if scan["ignored"]:
+        by_ext = _grouped_counter(
+            scan["ignored"], lambda r: os.path.splitext(r["relpath"])[1].lower() or "(none)"
+        )
+        detail = ", ".join(f"{ext} {n:,}" for ext, n in by_ext)
+        print(f"    ignored by extension: {detail}")
+
+    equation, remainder = _census_equation(scan)
+    print(f"  {equation}")
+    if remainder:
+        print("  ERROR census remainder is not zero — scanner bug, do not trust this run")
+    return remainder
+
+
+def run_census(cfg: dict, args) -> None:
+    """Scan every (selected, mounted) source and print the census."""
+    sources = [s for s in cfg["sources"] if not args.source or s["id"] in args.source]
+    if not sources:
+        raise SystemExit(f"no source matches {args.source}")
+
+    bad = 0
+    for source in sources:
+        if not os.path.isdir(source["path"]):
+            print(f"\n[{source['id']}] {source['label']} — NOT MOUNTED, skipped")
+            continue
+        scan = intake_scan.scan_source(source, cfg["settings"])
+        bad += 1 if render_census(source, scan, args.verbose) else 0
+    print("\ncensus only — nothing was copied.")
+    sys.exit(1 if bad else 0)
+
+
+# ==========================================================================
 # main
 # ==========================================================================
 def main() -> None:
@@ -302,14 +412,33 @@ def main() -> None:
         action="store_true",
         help="print the resolved configuration and exit",
     )
+    ap.add_argument(
+        "--census",
+        action="store_true",
+        help="classification census of every source file (read-only, no grouping)",
+    )
+    ap.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        help="limit to this source id (repeatable; default: all)",
+    )
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help="per-file quarantine listing",
+    )
     args = ap.parse_args()
 
     cfg = load_intake_config(args.config)
     if args.show_config:
         show_config(cfg, args.config)
         return
+    if args.census:
+        run_census(cfg, args)
+        return
 
-    ap.error("only --show-config is implemented so far (build milestone M0)")
+    ap.error("the plan mode arrives in milestone M2 — use --census or --show-config")
 
 
 if __name__ == "__main__":
