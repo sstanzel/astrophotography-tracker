@@ -30,7 +30,9 @@ For each set holding WBPP output this script:
        scratch, recreatable by re-running the stack.
 
 Preview by default; --apply performs the moves/deletes. Safe to re-run:
-sets whose master is already canonical produce no actions.
+sets whose master is already canonical produce no actions. Every --apply
+appends what it did to `_organization/dev/actions.log` (see astro_config.
+log_actions).
 
 Usage:
     python3 file_masters.py            # preview
@@ -206,23 +208,32 @@ def set_actions(
     return actions
 
 
-def perform(action: dict) -> None:
-    """Execute one action from find_set_actions."""
+def perform(action: dict) -> str:
+    """Execute one action from find_set_actions and return its log line."""
     if action["kind"] == "move":  # out of master/ up into the set folder
         set_dir = os.path.dirname(os.path.dirname(action["src"]))
-        shutil.move(action["src"], os.path.join(set_dir, action["dst"]))
-    elif action["kind"] == "rename":  # already in the set folder
-        os.rename(action["src"], os.path.join(os.path.dirname(action["src"]), action["dst"]))
-    elif action["kind"] == "rmdir":
-        shutil.rmtree(action["path"])
+        dst = os.path.join(set_dir, action["dst"])
+        shutil.move(action["src"], dst)
+        return f"move '{action['src']}' → '{dst}'"
+    if action["kind"] == "rename":  # already in the set folder
+        dst = os.path.join(os.path.dirname(action["src"]), action["dst"])
+        os.rename(action["src"], dst)
+        return f"rename '{action['src']}' → '{dst}'"
+    n = sum(len(files) for _, _, files in os.walk(action["path"]))
+    shutil.rmtree(action["path"])
+    return f"rmdir '{action['path']}' ({n} files)"
 
 
 def describe(action: dict) -> str:
-    """One preview/report line for an action."""
+    """One preview/report line for an action.
+
+    Arrows are U+2192, never ASCII '->': a pasted '->' line redirects in a
+    shell and creates an empty file named like the master (2026-07-12 strays).
+    """
     if action["kind"] == "move":
-        return f"  file    {action['rel']}\n          master/{os.path.basename(action['src'])} -> {action['dst']}"
+        return f"  file    {action['rel']}\n          master/{os.path.basename(action['src'])} → {action['dst']}"
     if action["kind"] == "rename":
-        return f"  rename  {action['rel']}\n          {os.path.basename(action['src'])} -> {action['dst']}"
+        return f"  rename  {action['rel']}\n          {os.path.basename(action['src'])} → {action['dst']}"
     label = os.path.basename(action["path"])
     n = action.get("n_files")
     return f"  sweep   {action['rel']}  ({label}/" + (f", {n} scratch files)" if n else ")")
@@ -256,10 +267,12 @@ def main() -> int:
     if not all_actions and not all_warnings:
         print("Nothing to do: no WBPP output found in any Bias/Dark set.")
         return 0
+    log_lines: list[str] = []
     for a in all_actions:
         print(describe(a))
         if args.apply:
-            perform(a)
+            log_lines.append(perform(a))
+    astro_config.log_actions("file_masters", log_lines)
     for w in all_warnings:
         print(f"  WARN    {w}")
     moved = sum(1 for a in all_actions if a["kind"] in ("move", "rename"))

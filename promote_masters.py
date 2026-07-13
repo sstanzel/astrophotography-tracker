@@ -183,6 +183,7 @@ def main() -> None:
         return
 
     total, copied = len(pending), 0
+    log_lines: list[str] = []
     for src, dst, present in plan:
         if present:
             continue
@@ -191,6 +192,8 @@ def main() -> None:
         print(f"  [{copied}/{total}] {os.path.basename(src)} ({mb:.0f} MB)…", flush=True)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
+        log_lines.append(f"copy '{src}' → '{dst}'")
+    astro_config.log_actions("promote_masters", log_lines)
     print(f"Copied {copied} keeper(s) into their Results folders.")
 
 

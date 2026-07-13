@@ -149,6 +149,7 @@ def main():
     targets = []  # (working_folder_path, file_count, bytes)
     skipped = []  # (working_folder_path, a master still only in working)
     promoted = []  # (master_src, results_dir) copied to Results first
+    log_lines = []  # applied actions, for the shared dev/actions.log
 
     for lib in libraries:
         libroot = lib["path"]
@@ -193,6 +194,7 @@ def main():
                         if args.apply:
                             os.makedirs(rdir, exist_ok=True)
                             shutil.copy2(m, dst)
+                            log_lines.append(f"copy '{m}' → '{dst}'")
                         promoted.append((m, rdir))
                 for wf in WORKING_FOLDERS:
                     wpath = os.path.join(ppath, wf)
@@ -251,8 +253,10 @@ def main():
         try:
             removed_files += empty_folder(wpath)
             removed_folders += 1
+            log_lines.append(f"empty '{wpath}' ({fc} files)")
         except OSError as e:
             print(f"  ! could not empty {wpath}: {e}")
+    astro_config.log_actions("clean_processing", log_lines)
     print(
         f"Done — emptied {removed_folders} folder(s), "
         f"removed {removed_files} files, reclaimed {human(total_bytes)}."
