@@ -398,15 +398,31 @@ def build_library_index() -> dict:
     return {"names": names, "by_target_night": by_tn, "libraries": libraries}
 
 
+# Recreatable working folders inside a session — copies of frames in there
+# (PI Magic's Discarded/, PixInsight scratch) must not inflate the dedupe
+# light count. Same concern as scrub.py's SCRATCH_FRAME check.
+SCRATCH_DIR_MARKERS = ("PI Process", "PI Magic")
+SCRATCH_DIR_SUFFIXES = (".pxiproject", " Results")
+
+
 def count_library_lights(session_path: str) -> int:
-    """Light frames (kept + Rejected) in an existing library session."""
-    from ingest import walk_fits
-    from fits_parser import frame_kind
+    """Light frames (kept + Rejected) in an existing library session,
+    excluding processing-scratch and results folders."""
+    from fits_parser import frame_kind, parse
 
     n = 0
-    for _fpath, _is_rej, m in walk_fits(session_path):
-        if m is not None and frame_kind(m) == "light":
-            n += 1
+    for root, dirs, files in os.walk(session_path):
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in SCRATCH_DIR_MARKERS and not d.endswith(SCRATCH_DIR_SUFFIXES)
+        ]
+        for f in files:
+            if f.startswith("._") or not f.lower().endswith((".fit", ".fits", ".xisf")):
+                continue
+            m = parse(f)
+            if m is not None and frame_kind(m) == "light":
+                n += 1
     return n
 
 
