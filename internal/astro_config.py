@@ -2,14 +2,14 @@
 astro_config.py - shared configuration for the astrophotography tracker scripts.
 
 Capture-library locations are the one thing that varies between machines (and
-between users), so they live in config.toml next to these scripts. Everything
+between users), so they live in config.toml at the tracker root. Everything
 else - the _organization folder, locations.toml, plans.toml, the target-folder
 registry - is found RELATIVE to where these scripts live, so nothing else needs
 to be configured.
 
-    config.toml          <- edit this to add/remove/move libraries
-    astro_config.py      <- this file (shared by all the scripts)
-    ingest.py, populate_notes.py, clean_processing.py, validate.py, ...
+    tracker/config.toml           <- edit this to add/remove/move libraries
+    tracker/refresh.py, ...       <- the user-run commands
+    tracker/internal/             <- this file + the chained/imported modules
 
 Used by every script that touches the libraries:
     import astro_config
@@ -21,11 +21,13 @@ import datetime
 import os
 import re
 
-# This file lives in  {library}/_organization/tracker/ , so the
-# _organization folder is its parent directory and needs no configuration.
+# This file lives in  {library}/_organization/tracker/internal/ , so the
+# tracker root is its parent directory and _organization the grandparent -
+# neither needs any configuration.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ORG_DIR = os.path.dirname(SCRIPT_DIR)  # .../_organization
-DEFAULT_CONFIG = os.path.join(SCRIPT_DIR, "config.toml")
+TRACKER_DIR = os.path.dirname(SCRIPT_DIR)  # .../_organization/tracker
+ORG_DIR = os.path.dirname(TRACKER_DIR)  # .../_organization
+DEFAULT_CONFIG = os.path.join(TRACKER_DIR, "config.toml")
 
 VALID_ROLES = ("working", "archive")
 

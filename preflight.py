@@ -37,7 +37,7 @@ import shutil
 import sys
 from collections import Counter
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "internal"))
 import astro_config  # noqa: E402
 from ingest import SESSION_RE, parse_target_folder, walk_fits  # noqa: E402
 from fits_parser import frame_kind, safe, exposure_seconds, is_non_science  # noqa: E402

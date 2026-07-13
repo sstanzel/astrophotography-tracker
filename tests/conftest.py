@@ -10,7 +10,10 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Tracker root (top-level commands) + internal/ (shared/chained modules).
+_TRACKER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _TRACKER_ROOT)
+sys.path.insert(0, os.path.join(_TRACKER_ROOT, "internal"))
 
 
 def write_file(path, content: str | None = None) -> None:

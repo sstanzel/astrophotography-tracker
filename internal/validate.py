@@ -10,8 +10,8 @@ Three filesystem-structural checks (UNPARSED_SESSION_NAME, CAL_EMPTY,
 CAL_NAMING) only run inside a full ingest.py run, because they depend on
 walking folders that have no row in the database. Run ingest.py for those.
 
-Usage:
-    python3 validate.py [--db PATH]
+Usage (from the tracker root):
+    python3 internal/validate.py [--db PATH]
 """
 
 import argparse
@@ -26,14 +26,15 @@ import astro_config  # noqa: E402
 
 
 def main():
-    here = os.path.dirname(os.path.abspath(__file__))
+    # tracker.db lives at the tracker root, one level up from internal/.
+    tracker_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(
         description="Re-run the tracker data-validation pass against an existing DB."
     )
     ap.add_argument(
         "--db",
-        default=os.path.join(here, "tracker.db"),
-        help="path to tracker.db (default: next to this script)",
+        default=os.path.join(tracker_root, "tracker.db"),
+        help="path to tracker.db (default: at the tracker root)",
     )
     args = ap.parse_args()
 

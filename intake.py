@@ -32,7 +32,11 @@ import shutil
 import sys
 import tomllib
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# preflight/ingest are imported lazily from the top level; the shared modules
+# (astro_config, intake_scan, intake_ledger, fits_parser) live in internal/.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.join(_HERE, "internal"))
 import astro_config  # noqa: E402
 import intake_ledger  # noqa: E402
 import intake_scan  # noqa: E402
