@@ -112,6 +112,7 @@ QUERIES = {
         "Light combos needing calibration attention (shoot, build, or stale)",
         """
         SELECT camera, gain, exp_s AS exposure, light_subs AS subs, hours,
+               temp_min AS "temp min", temp_max AS "temp max",
                subs_dark_none AS "missing dark", dark_status AS dark,
                bias_status AS bias
         FROM v_light_calibration_coverage
