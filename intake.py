@@ -26,12 +26,15 @@ Usage:
 
 import argparse
 import datetime as dt
+import hashlib
 import os
+import shutil
 import sys
 import tomllib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import astro_config  # noqa: E402
+import intake_ledger  # noqa: E402
 import intake_scan  # noqa: E402
 
 from intake_scan import (  # noqa: E402
@@ -159,10 +162,42 @@ def load_intake_config(path: str) -> dict:
             }
         )
 
+    ignores: list[dict] = []
+    for i, b in enumerate(raw.get("ignore", [])):
+        where = f"[[ignore]] #{i + 1}"
+        entry = {
+            "source": str(b.get("source", "") or "").strip(),
+            "target": str(b.get("target", "") or "").strip(),
+            "night": _as_date(b.get("night"), f"{where}: night", errors),
+        }
+        if not (entry["source"] or entry["target"] or entry["night"]):
+            errors.append(f"{where}: needs at least one of source/target/night")
+        if entry["source"] and seen_ids and entry["source"] not in seen_ids:
+            errors.append(f"{where}: source {entry['source']!r} does not match any [[source]] id")
+        ignores.append(entry)
+
     _check_rig_conflicts(rigs, errors)
     if errors:
         raise SystemExit(f"{path}: {len(errors)} problem(s):\n  " + "\n  ".join(errors))
-    return {"settings": settings, "sources": sources, "rigs": rigs}
+    return {"settings": settings, "sources": sources, "rigs": rigs, "ignores": ignores}
+
+
+def ignore_match(ignores: list[dict], session: dict) -> dict | None:
+    """The first [[ignore]] block matching a planned session, or None.
+
+    All keys present in a block must match (AND); target compares against the
+    session's normalized target id, case-insensitive, underscores or spaces.
+    """
+    sess_target = session["name"].split(" ")[0].lower()
+    for ig in ignores:
+        if ig["source"] and ig["source"] != session["source"]:
+            continue
+        if ig["target"] and ig["target"].replace(" ", "_").lower() != sess_target:
+            continue
+        if ig["night"] and ig["night"] != session["night"]:
+            continue
+        return ig
+    return None
 
 
 def _check_rig_conflicts(rigs: list[dict], errors: list[str]) -> None:
@@ -494,42 +529,100 @@ def projected_preflight(session: dict, vocab: dict, staged_names: set[str]) -> t
 
 
 # ==========================================================================
-# Plan mode (read-only)
+# Copy protocol — .part, hash-verify, atomic rename (see USAGE.md)
 # ==========================================================================
-def _session_bytes(session: dict) -> int:
-    lists = (session["lights"], session["flats"], session["darkflats"], session["logs"])
-    return sum(rec["size"] for records in lists for rec in records)
+COPY_CHUNK_BYTES = 1024 * 1024
 
 
-def _mapping_lines(session: dict) -> list[str]:
-    """Per-mapping `source dir → dest dir  N files  size` lines for one session."""
+def copy_verified(src: str, dest: str, hash_name: str) -> tuple[str, str | None]:
+    """Copy one file with verification; never leaves a partial dest.
+
+    Streams src → dest+'.part' hashing the source read, fsyncs, re-stats the
+    source (a change means something wrote it mid-copy — the .part is deleted
+    and the file stays new for the next run), re-reads the .part to verify the
+    bytes that landed on the destination volume, then atomically renames.
+
+    Args:
+        src: absolute source path (opened read-only).
+        dest: absolute final destination (must not exist).
+        hash_name: digest name from [intake] hash.
+
+    Returns:
+        ('ok', hexdigest) on success; ('source-changed', None) or
+        ('verify-failed', None) with the .part removed otherwise.
+    """
+    st0 = os.stat(src)
+    part = dest + ".part"
+    h = hashlib.new(hash_name)
+    with open(src, "rb") as fin, open(part, "wb") as fout:
+        while chunk := fin.read(COPY_CHUNK_BYTES):
+            h.update(chunk)
+            fout.write(chunk)
+        fout.flush()
+        os.fsync(fout.fileno())
+    st1 = os.stat(src)
+    if (st1.st_size, st1.st_mtime_ns) != (st0.st_size, st0.st_mtime_ns):
+        os.remove(part)
+        return "source-changed", None
+    h2 = hashlib.new(hash_name)
+    with open(part, "rb") as fin:
+        while chunk := fin.read(COPY_CHUNK_BYTES):
+            h2.update(chunk)
+    if h2.hexdigest() != h.hexdigest():
+        os.remove(part)
+        return "verify-failed", None
+    os.rename(part, dest)
+    os.utime(dest, ns=(st0.st_atime_ns, st0.st_mtime_ns))
+    try:  # best-effort directory durability (SMB volumes may refuse)
+        dfd = os.open(os.path.dirname(dest), os.O_RDONLY)
+        os.fsync(dfd)
+        os.close(dfd)
+    except OSError:
+        pass
+    return "ok", h.hexdigest()
+
+
+# ==========================================================================
+# Plan decisions (shared by the plan display and --apply)
+# ==========================================================================
+def _session_groups(session: dict) -> list[tuple[str, list[dict], str]]:
+    """(label, records, dest subdir) for each mapping group of a session."""
     flat_dir = flat_folder_name(session["rig"], session["night"])
-    groups = (
+    return [
         ("lights", session["lights"], LIGHT_SUBDIR),
         ("flats", session["flats"], f"{flat_dir}/{FLAT_SUBDIR}"),
         ("dark flats", session["darkflats"], f"{flat_dir}/{DARKFLAT_SUBDIR}"),
         ("logs", session["logs"], LOG_SUBDIR),
-    )
-    lines = []
-    for label, records, dest in groups:
-        by_dir: dict[str, list[dict]] = {}
-        for rec in records:
-            by_dir.setdefault(os.path.dirname(rec["relpath"]) or ".", []).append(rec)
-        for src_dir, recs in sorted(by_dir.items()):
-            size = sum(r["size"] for r in recs)
-            lines.append(
-                f"{label:<10} {src_dir}/ → {dest}/   {len(recs):,} file(s)  {_gb(size)}"
-            )
-    return lines
+    ]
 
 
-def render_plan(cfg: dict, args, scans: dict[str, dict]) -> int:
-    """Print the full intake plan; return the number of problems (bad exit)."""
+def _filed_path(lib_index: dict, session_name: str, dest_relpath: str) -> str | None:
+    """Where a ledger row's file would live if preflight already filed its
+    session into a library — or None when the session isn't filed."""
+    lib_session = lib_index["names"].get(session_name)
+    if not lib_session:
+        return None
+    inner = dest_relpath.split("/", 1)
+    return os.path.join(lib_session, inner[1]) if len(inner) == 2 else None
+
+
+def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
+    """Annotate every planned session and file with its copy decision.
+
+    Read-only. Decisions per file of a NEW session: 'copy' (fresh, or changed
+    at source with a free destination, or --reimport of a missing dest),
+    'skip' (verified copy already in staging or filed into the library), or
+    'hold' (needs a human: destination occupied by an unledgered file, or a
+    previously-imported copy vanished and --reimport wasn't given).
+
+    Returns:
+        The full plan context consumed by render_plan()/run_apply().
+    """
     settings = cfg["settings"]
     staging = resolve_staging(settings)
-    staged_names = set()
-    if staging and os.path.isdir(staging):
-        staged_names = {d for d in os.listdir(staging) if not d.startswith(".")}
+    ledger_path = resolve_ledger(settings)
+    con = intake_ledger.open_ledger(ledger_path)
+    interrupted = intake_ledger.relabel_stale_runs(con)
 
     lib_index = build_library_index()
     vocab = load_registry_vocab()
@@ -537,19 +630,136 @@ def render_plan(cfg: dict, args, scans: dict[str, dict]) -> int:
     nights = {dt.date.fromisoformat(n) for n in args.night} if args.night else None
     plan = group_sessions(scans, cfg["rigs"], since=since, nights=nights)
 
+    attention: list[str] = []
+    known_by_source = {sid: intake_ledger.known_files(con, sid) for sid in scans}
+
+    for sess in plan["sessions"]:
+        sess["files"] = []
+        sess["status_note"] = ""
+        if ignore_match(cfg["ignores"], sess):
+            sess["status"] = "ignored"
+            continue
+
+        existing = lib_index["names"].get(sess["name"])
+        if existing:
+            sess["status"] = "already"
+            lib_lights = count_library_lights(existing)
+            if lib_lights == len(sess["lights"]):
+                sess["status_note"] = f"already in library — counts match ({lib_lights} lights)"
+            else:
+                sess["status_note"] = (
+                    f"already in library — count mismatch: source {len(sess['lights'])} "
+                    f"lights, library {lib_lights}"
+                )
+                attention.append(f"{sess['name']}: {sess['status_note']}")
+            continue
+
+        sess["status"] = "new"
+        known = known_by_source[sess["source"]]
+        for label, records, dest_sub in _session_groups(sess):
+            for rec in records:
+                dest_rel = f"{sess['name']}/{dest_sub}/{os.path.basename(rec['relpath'])}"
+                dest_abs = os.path.join(staging, dest_rel)
+                row = known.get(rec["relpath"])
+                decision, note = "copy", ""
+                if row and (row["size"], row["mtime_ns"]) == (rec["size"], rec["mtime_ns"]):
+                    filed = _filed_path(lib_index, row["session"], row["dest_relpath"])
+                    if os.path.exists(os.path.join(staging, row["dest_relpath"])):
+                        decision = "skip"
+                    elif filed and os.path.exists(filed):
+                        decision, note = "skip", "filed"
+                    elif args.reimport:
+                        note = "reimport — previous copy vanished"
+                    else:
+                        decision = "hold"
+                        note = "previously imported (run %d) but the copy is gone" % row["run_id"]
+                elif row:
+                    if os.path.exists(dest_abs):
+                        decision, note = "hold", "changed at source AND destination occupied"
+                    else:
+                        note = f"changed at source since run {row['run_id']}"
+                elif os.path.exists(dest_abs):
+                    decision = "hold"
+                    note = "destination exists but is not in the ledger — never overwritten"
+                if note and decision != "skip":
+                    attention.append(f"{sess['name']}: {os.path.basename(rec['relpath'])} — {note}")
+                sess["files"].append(
+                    {
+                        "rec": rec,
+                        "label": label,
+                        "dest_rel": dest_rel,
+                        "decision": decision,
+                        "note": note,
+                    }
+                )
+
+        base = sess["name"].split(" ")[0]
+        base = base[: -len("_adjacent")] if base.lower().endswith("_adjacent") else base
+        twins = [
+            n
+            for n in lib_index["by_target_night"].get((base, sess["night"].isoformat()), [])
+            if n != sess["name"]
+        ]
+        if twins and any(f["decision"] == "copy" for f in sess["files"]):
+            attention.append(
+                f"{sess['name']}: same target+night already in the library under a different "
+                f"name: {', '.join(twins)} — copying would duplicate that night"
+            )
+
+    # Reconciliation: every ledger row's copy must still exist somewhere.
+    missing_by_session: dict[str, int] = {}
+    for row in intake_ledger.all_copied_rows(con):
+        if os.path.exists(os.path.join(staging, row["dest_relpath"])):
+            continue
+        filed = _filed_path(lib_index, row["session"], row["dest_relpath"])
+        if filed and os.path.exists(filed):
+            continue
+        missing_by_session[row["session"]] = missing_by_session.get(row["session"], 0) + 1
+    for session_name, n in sorted(missing_by_session.items()):
+        attention.append(
+            f"ledger: {n} file(s) imported into {session_name!r} are in neither staging nor "
+            f"the library — deleted by hand? re-offer with --reimport"
+        )
+
+    return {
+        "staging": staging,
+        "ledger_path": ledger_path,
+        "con": con,
+        "interrupted": interrupted,
+        "lib_index": lib_index,
+        "vocab": vocab,
+        "plan": plan,
+        "attention": attention,
+    }
+
+
+# ==========================================================================
+# Plan rendering
+# ==========================================================================
+def render_plan(cfg: dict, args, scans: dict[str, dict], ctx: dict) -> int:
+    """Print the full intake plan; return nonzero when the equation breaks."""
+    settings = cfg["settings"]
+    staging, plan = ctx["staging"], ctx["plan"]
+    staged_names = set()
+    if staging and os.path.isdir(staging):
+        staged_names = {d for d in os.listdir(staging) if not d.startswith(".")}
+
     print("Intake plan")
     print(f"Config  : {args.config}")
     state = "" if staging and os.path.isdir(staging) else "  (does not exist yet — created on --apply)"
     print(f"Staging : {staging}{state}")
-    print(f"Ledger  : {resolve_ledger(settings)}  (not consulted — arrives in milestone M3)")
-    for label, path, mounted in lib_index["libraries"]:
+    n_known = sum(1 for _ in intake_ledger.all_copied_rows(ctx["con"]))
+    print(f"Ledger  : {ctx['ledger_path']}  ({n_known:,} copies recorded)")
+    if ctx["interrupted"]:
+        print(f"          {ctx['interrupted']} interrupted run(s) relabeled — their files re-offer below")
+    for label, _path, mounted in ctx["lib_index"]["libraries"]:
         note = "mounted" if mounted else "NOT MOUNTED — its sessions are invisible to dedupe"
         print(f"Dedupe  : library {label} — {note}")
 
-    to_copy_sessions: list[dict] = []
-    already = 0
-    attention: list[str] = []
-    accounted_science = 0
+    n_copy = n_skip = n_hold = n_already = n_ignored = 0
+    log_copy = 0
+    total_bytes = 0
+    new_sessions = 0
 
     for sid in sorted(scans):
         sessions = [s for s in plan["sessions"] if s["source"] == sid]
@@ -558,37 +768,53 @@ def render_plan(cfg: dict, args, scans: dict[str, dict]) -> int:
 
         for sess in sessions:
             n_frames = sum(len(sess[k]) for k in ("lights", "flats", "darkflats"))
-            accounted_science += n_frames
-            existing = lib_index["names"].get(sess["name"])
-            if existing:
-                already += n_frames
-                lib_lights = count_library_lights(existing)
-                if lib_lights == len(sess["lights"]):
-                    status = f"already in library — counts match ({lib_lights} lights)"
-                else:
-                    status = (
-                        f"already in library — count mismatch: source {len(sess['lights'])} "
-                        f"lights, library {lib_lights}"
-                    )
-                    attention.append(f"{sess['name']}: {status}")
+            if sess["status"] == "already":
+                n_already += n_frames
+                print(f"  {sess['name']:<52} {sess['status_note']}")
+                continue
+            if sess["status"] == "ignored":
+                n_ignored += n_frames
+                print(f"  {sess['name']:<52} ignored (config)")
+                continue
+
+            counts = {"copy": 0, "skip": 0, "hold": 0}
+            for f in sess["files"]:
+                counts[f["decision"]] += 1
+                is_science = f["label"] != "logs"
+                if f["decision"] == "copy":
+                    total_bytes += f["rec"]["size"]
+                    if is_science:
+                        n_copy += 1
+                    else:
+                        log_copy += 1
+                elif is_science:
+                    n_skip += f["decision"] == "skip"
+                    n_hold += f["decision"] == "hold"
+            if counts["copy"] == 0:
+                status = "nothing to copy — all files already imported"
                 print(f"  {sess['name']:<52} {status}")
                 continue
 
-            twins = [
-                n
-                for n in lib_index["by_target_night"].get(
-                    (sess["name"].split(" ")[0].removesuffix("_adjacent"),
-                     sess["night"].isoformat()),
-                    [],
-                )
-                if n != sess["name"]
-            ]
-            to_copy_sessions.append(sess)
+            new_sessions += 1
             print(f"\n  {sess['name']}    new session folder")
-            print(f"      rig        {sess['cam']} on {sid} → "
-                  f"{sess['rig']['scope']} + {sess['rig']['sensor']} ({sess['rule']})")
-            for line in _mapping_lines(sess):
-                print(f"      {line}")
+            print(
+                f"      rig        {sess['cam']} on {sid} → "
+                f"{sess['rig']['scope']} + {sess['rig']['sensor']} ({sess['rule']})"
+            )
+            by_group: dict[tuple[str, str], list[dict]] = {}
+            for f in sess["files"]:
+                if f["decision"] != "copy":
+                    continue
+                src_dir = os.path.dirname(f["rec"]["relpath"]) or "."
+                dest_dir = os.path.dirname(f["dest_rel"]).split("/", 1)[1]
+                by_group.setdefault((f["label"], f"{src_dir}/ → {dest_dir}/"), []).append(f)
+            for (label, arrow), fs in sorted(by_group.items(), key=lambda kv: kv[0]):
+                size = sum(f["rec"]["size"] for f in fs)
+                print(f"      {label:<10} {arrow}   {len(fs):,} file(s)  {_gb(size)}")
+            if counts["skip"]:
+                print(f"      skipped    {counts['skip']:,} file(s) already imported (ledger)")
+            if counts["hold"]:
+                print(f"      held       {counts['hold']:,} file(s) need a decision — see attention")
             stamps = f"{sess['name']} notes.toml"
             if settings["pxiproject_template"]:
                 stamps += f" · {sess['name']}.pxiproject (from template)"
@@ -600,20 +826,20 @@ def render_plan(cfg: dict, args, scans: dict[str, dict]) -> int:
                     f"      warning    {sess['date_dir_mismatches']} frame(s) sit in a NINA "
                     f"date folder that differs from the computed civil night"
                 )
-            verdict, reasons = projected_preflight(sess, vocab, staged_names)
-            print(f"      preflight (projected) {verdict}" + (f" — {reasons[0]}" if reasons else ""))
+            verdict, reasons = projected_preflight(sess, ctx["vocab"], staged_names)
+            print(
+                f"      preflight (projected) {verdict}"
+                + (f" — {reasons[0]}" if reasons else "")
+            )
             for extra in reasons[1:]:
                 print(f"          {extra}")
-            if twins:
-                line = (
-                    f"{sess['name']}: same target+night already in the library under a "
-                    f"different name: {', '.join(twins)} — copying would duplicate that night"
-                )
-                attention.append(line)
 
     cal_sets = calibration_sets(plan["calibration"])
     if cal_sets:
-        print("\ncalibration — reported only, not staged (library routing arrives in a later milestone)")
+        print(
+            "\ncalibration — reported only, not staged "
+            "(library routing arrives in a later milestone)"
+        )
         for c in cal_sets:
             print(
                 f"  {c['source']:<8} {c['kind']:<5} {c['exp']:<8} gain{c['gain']} "
@@ -624,7 +850,10 @@ def render_plan(cfg: dict, args, scans: dict[str, dict]) -> int:
         print("\nquarantine — nothing copied; fix at the source or ignore")
         by_key = _grouped_counter(
             plan["quarantine"],
-            lambda r: f"{r.get('source', '?')}  {os.path.dirname(r['relpath']) or '.'}/ — {r.get('reason', '?')}",
+            lambda r: (
+                f"{r.get('source', '?')}  {os.path.dirname(r['relpath']) or '.'}/ — "
+                f"{r.get('reason', '?')}"
+            ),
         )
         for line, n in by_key:
             print(f"  {line}  ({n:,} file(s))")
@@ -645,40 +874,182 @@ def render_plan(cfg: dict, args, scans: dict[str, dict]) -> int:
         for line, n in by_key:
             print(f"  {line}  ({n:,} item(s))")
 
-    if attention:
+    if ctx["attention"]:
         print("\nattention")
-        for line in attention:
+        for line in ctx["attention"]:
             print(f"  {line}")
 
-    # ---- plan equation over every selected science frame -------------------
-    to_copy = sum(
-        sum(len(s[k]) for k in ("lights", "flats", "darkflats")) for s in to_copy_sessions
-    )
     n_cal = len(plan["calibration"])
     n_quar = len(plan["quarantine"])
     n_unmapped = sum(len(g["records"]) for g in plan["unmapped"])
-    n_unatt = sum(1 for r in plan["unattached"] if "kind" in r)  # science only, not logs
-    remainder = plan["selected"] - (to_copy + already + n_cal + n_quar + n_unmapped + n_unatt)
-    total_bytes = sum(_session_bytes(s) for s in to_copy_sessions)
-    print(
-        f"\ntotals: {len(to_copy_sessions)} new session folder(s), {to_copy:,} frame(s) + logs, "
-        f"{_gb(total_bytes)} to copy"
+    n_unatt = sum(1 for r in plan["unattached"] if "kind" in r)
+    remainder = plan["selected"] - (
+        n_copy + n_skip + n_hold + n_already + n_ignored + n_cal + n_quar + n_unmapped + n_unatt
     )
     print(
-        f"plan equation: {plan['selected']:,} science in scope = {to_copy:,} to copy + "
-        f"{already:,} already in library + {n_cal:,} calibration + {n_quar:,} quarantine + "
-        f"{n_unmapped:,} unmapped + {n_unatt:,} unattached · remainder {remainder}"
+        f"\ntotals: {new_sessions} session folder(s) to create/fill, "
+        f"{n_copy:,} frame(s) + {log_copy} log(s), {_gb(total_bytes)} to copy"
+    )
+    print(
+        f"plan equation: {plan['selected']:,} science in scope = {n_copy:,} to copy + "
+        f"{n_skip:,} already copied (ledger) + {n_already:,} already in library + "
+        f"{n_ignored:,} ignored + {n_cal:,} calibration + {n_quar:,} quarantine + "
+        f"{n_unmapped:,} unmapped + {n_unatt:,} unattached + {n_hold:,} held"
+        f" · remainder {remainder}"
         + (f" · {plan['filtered_out']:,} outside the night filter" if plan["filtered_out"] else "")
     )
-    problems = 1 if remainder else 0
     if remainder:
         print("ERROR plan equation remainder is not zero — grouping bug, do not trust this plan")
-    print("\nplan only — nothing was copied. Apply arrives in milestone M3.")
-    return problems
+        return 1
+    return 0
+
+
+
+# ==========================================================================
+# Apply
+# ==========================================================================
+def _clean_stale_parts(staging: str) -> int:
+    """Delete leftover *.part files under staging (incomplete by construction)."""
+    n = 0
+    for root, _dirs, files in os.walk(staging):
+        for f in files:
+            if f.endswith(".part"):
+                os.remove(os.path.join(root, f))
+                n += 1
+    return n
+
+
+def stamp_session(staging: str, session_name: str, settings: dict) -> list[str]:
+    """Stamp notes.toml and the .pxiproject template into a new session.
+
+    Both stamps are skip-if-present (idempotent resume) and the pxiproject is
+    copied opaquely — its internals are the user's to maintain, never edited.
+
+    Returns:
+        Action-log lines for what was actually stamped.
+    """
+    lines: list[str] = []
+    sdir = os.path.join(staging, session_name)
+
+    notes_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "notes.toml")
+    notes_dest = os.path.join(sdir, f"{session_name} notes.toml")
+    if os.path.exists(notes_src) and not os.path.exists(notes_dest):
+        shutil.copyfile(notes_src, notes_dest)
+        lines.append(f"stamp '{notes_dest}'")
+
+    template = settings["pxiproject_template"]
+    if template and os.path.isdir(template):
+        proj_dest = os.path.join(sdir, f"{session_name}.pxiproject")
+        if not os.path.exists(proj_dest):
+            shutil.copytree(template, proj_dest + ".part")
+            os.rename(proj_dest + ".part", proj_dest)
+            lines.append(f"stamp '{proj_dest}' (from template)")
+    elif template:
+        print(f"      note      pxiproject template not found: {template} — skipped")
+    return lines
+
+
+def _real_preflight_verdict(staging: str, session_name: str, vocab: dict) -> str:
+    """Run preflight's actual check_session on a just-created staged folder."""
+    from preflight import check_session, library_target_map
+
+    libs = astro_config.load_libraries()
+    working = next(
+        (lib for lib in libs if lib["role"] == "working" and os.path.isdir(lib["path"])), None
+    )
+    if not working:
+        return "preflight: no mounted working library — run preflight.py once one is mounted"
+    targets = library_target_map(working["path"])
+    errors, warnings, _infos, _dest = check_session(
+        os.path.join(staging, session_name),
+        session_name,
+        targets,
+        vocab["targets"],
+        vocab["scopes"],
+        vocab["sensors"],
+        vocab["combos"],
+        working["path"],
+    )
+    verdict = "FAIL" if errors else ("WARN" if warnings else "OK")
+    detail = "; ".join(errors + warnings) or "clean"
+    return f"preflight (real) {verdict} — {detail}"
+
+
+def run_apply(cfg: dict, args, scans: dict[str, dict], ctx: dict) -> int:
+    """Execute the plan's copy decisions. Returns the process exit code."""
+    staging, con = ctx["staging"], ctx["con"]
+    to_do = [
+        s
+        for s in ctx["plan"]["sessions"]
+        if s["status"] == "new" and any(f["decision"] == "copy" for f in s["files"])
+    ]
+    if not to_do:
+        print("\napply: nothing to copy — every planned file is already imported.")
+        return 0
+
+    os.makedirs(staging, exist_ok=True)
+    stale = _clean_stale_parts(staging)
+    if stale:
+        print(f"\napply: removed {stale} stale .part file(s) from an interrupted run")
+
+    run_id = intake_ledger.begin_run(con, " ".join(sys.argv[1:]))
+    print(f"\napply: ledger run {run_id}")
+    log_lines: list[str] = []
+    n_files = n_bytes = n_failed = 0
+
+    for sess in to_do:
+        sdir = os.path.join(staging, sess["name"])
+        source = next(s for s in cfg["sources"] if s["id"] == sess["source"])
+        if not os.path.isdir(sdir):
+            os.makedirs(sdir)
+            intake_ledger.record_dir(con, run_id, sess["name"])
+            log_lines.append(f"mkdir '{sdir}'")
+        print(f"\n  {sess['name']}")
+
+        copied_here = 0
+        for f in sess["files"]:
+            if f["decision"] != "copy":
+                continue
+            src = os.path.join(source["path"], f["rec"]["relpath"])
+            dest = os.path.join(staging, f["dest_rel"])
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            if os.path.exists(dest):  # decided free at plan time; never overwrite
+                print(f"      HELD   {f['dest_rel']} — destination appeared since planning")
+                n_failed += 1
+                continue
+            status, sha = copy_verified(src, dest, cfg["settings"]["hash"])
+            if status != "ok":
+                print(f"      {status.upper()}  {f['rec']['relpath']} — not copied, stays new")
+                n_failed += 1
+                continue
+            intake_ledger.record_copy(
+                con, run_id, sess["source"], f["rec"], sess["name"], f["dest_rel"], sha
+            )
+            copied_here += 1
+            n_files += 1
+            n_bytes += f["rec"]["size"]
+
+        size = sum(f["rec"]["size"] for f in sess["files"] if f["decision"] == "copy")
+        print(f"      copied     {copied_here:,} file(s)  {_gb(size)}  (hash-verified)")
+        log_lines.append(
+            f"copy {copied_here} file(s) ({_gb(size)}) '{source['path']}' → '{sdir}' "
+            f"(ledger run {run_id})"
+        )
+        log_lines.extend(stamp_session(staging, sess["name"], cfg["settings"]))
+        print(f"      {_real_preflight_verdict(staging, sess['name'], ctx['vocab'])}")
+
+    intake_ledger.finish_run(con, run_id, n_files, n_bytes)
+    astro_config.log_actions("intake", log_lines)
+    print(
+        f"\napply complete: {n_files:,} file(s), {_gb(n_bytes)}, run {run_id} recorded in the "
+        f"ledger" + (f" — {n_failed} file(s) NOT copied (see above)" if n_failed else "")
+    )
+    print("next: python3 preflight.py  (validate + file), then refresh.py --notes")
+    return 1 if n_failed else 0
 
 
 def run_plan(cfg: dict, args) -> None:
-    """Scan the selected sources and print the plan."""
+    """Scan the selected sources, print the plan, optionally apply it."""
     sources = [s for s in cfg["sources"] if not args.source or s["id"] in args.source]
     if not sources:
         raise SystemExit(f"no source matches {args.source}")
@@ -690,7 +1061,15 @@ def run_plan(cfg: dict, args) -> None:
         scans[source["id"]] = intake_scan.scan_source(source, cfg["settings"])
     if not scans:
         raise SystemExit("no mounted sources — nothing to plan")
-    sys.exit(render_plan(cfg, args, scans))
+
+    ctx = decide(cfg, args, scans)
+    problems = render_plan(cfg, args, scans, ctx)
+    if problems:
+        sys.exit(1)  # a broken plan equation must never proceed to copies
+    if not args.apply:
+        print("\nplan only — nothing was copied. Add --apply to execute this plan.")
+        sys.exit(0)
+    sys.exit(run_apply(cfg, args, scans, ctx))
 
 
 # ==========================================================================
@@ -736,6 +1115,16 @@ def main() -> None:
         action="append",
         default=[],
         help="limit to this civil night (YYYY-MM-DD, repeatable)",
+    )
+    ap.add_argument(
+        "--apply",
+        action="store_true",
+        help="execute the plan: copy + verify + ledger + stamp (default: plan only)",
+    )
+    ap.add_argument(
+        "--reimport",
+        action="store_true",
+        help="re-offer ledgered files whose staged/filed copy has vanished",
     )
     args = ap.parse_args()
 
