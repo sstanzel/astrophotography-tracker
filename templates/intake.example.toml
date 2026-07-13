@@ -1,0 +1,77 @@
+# =============================================================================
+# intake.toml — capture-device import sources and rig mappings for intake.py
+#
+# Copy to _organization/intake.toml and edit. Everything device-, rig- and
+# naming-specific lives HERE — intake.py carries none of it. See USAGE.md
+# "Importing a capture night".
+# =============================================================================
+
+[intake]
+# Where built session folders land. Empty = "<working library>/_sessions to
+# organize" (the same staging folder preflight.py validates).
+staging = ""
+
+# Directory bundle copied opaquely into each new session as
+# "<session>.pxiproject" — maintain this template yourself (swap it when
+# PixInsight formats change or you want new process icons). Empty or missing
+# path = skip, with a note in the plan. intake never edits its internals.
+pxiproject_template = ""
+
+# Digest used to verify every copy (sha256 | sha1 | md5).
+hash = "sha256"
+
+# ASIAir writes a Chinese duplicate of every Autorun log (*_CHN.txt).
+copy_chn_logs = false
+
+# The durable record of every verified copy. Empty =
+# "_organization/intake_ledger.db". Primary state — never delete casually.
+ledger = ""
+
+# --- sources: one block per device dump root --------------------------------
+# layout selects the walk profile: "asiair" (Autorun|Plan/Light/<Target>/...,
+# flat Flat/ + Dark/ dumps, log/ folder) or "nina" (<YYYY-MM-DD>/LIGHT|FLAT|
+# DARK/... date folders).
+
+[[source]]
+id     = "air2600"
+label  = "ASIAir (2600 rig)"
+path   = "/Volumes/…/Astro_imports/2600AIR EMCC_CCC"
+layout = "asiair"
+
+[[source]]
+id     = "mele1"
+label  = "Mele 1 (NINA)"
+path   = "/Volumes/…/Astro_imports/Mele1_data/NINA"
+layout = "nina"
+
+# --- rigs: (source, camera token) → Scope + Sensor session tokens -----------
+# camera matches the parsed filename token exactly ("2600MC",
+# "Poseidon-C PRO", "QHYminiCam8M"); "*" matches any camera on that source.
+# scope/sensor must be registry names (scope_values/, sensor_values/).
+#
+# Equipment swaps: add a dated entry — from/to are TOML dates (civil night,
+# inclusive, either may be omitted). A dated entry in range beats the
+# open-ended entry for the same (source, camera). Overlapping dated ranges
+# are a config error.
+#
+# adjacent = true appends "_adjacent" to the target token (second-rig
+# sessions shot on a field next to the main target — see preflight.py).
+
+[[rig]]
+source = "air2600"
+camera = "2600MC"
+scope  = "RASA8"
+sensor = "ASI2600MCAir"
+
+[[rig]]                       # example: this camera was on another scope
+source = "air2600"            # earlier in the year
+camera = "2600MC"
+scope  = "Pleiades111"
+sensor = "ASI2600MCAir"
+to     = 2026-04-18
+
+[[rig]]
+source = "mele1"
+camera = "Poseidon-C PRO"
+scope  = "Pleiades111"
+sensor = "PoseidonCPro"
