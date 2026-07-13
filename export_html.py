@@ -317,7 +317,8 @@ def main():
                                   FROM coverage_settings WHERE id=1)=1))
                            ORDER BY class, camera, temperature_c, gain, exp_s"""),
         "coverage": rows("""SELECT camera, gain, exp_s AS exp, light_subs AS subs,
-                                   hours, dark_status, bias_status
+                                   hours, temp_min, temp_max,
+                                   dark_status, bias_status
                             FROM v_light_calibration_coverage
                             WHERE dark_status NOT IN ('ok','n/a')
                                OR bias_status NOT IN ('ok','n/a')
@@ -746,7 +747,7 @@ function sortableTable(tblEl, cols, data, opts){
     restack:   {label:"Restack",      cols:[["target_id","Target"],["folder_name","Integration"],["built_hours","Built","num",r=>fmtHM(r.built_hours)],["available_hours","Available","num",r=>fmtHM(r.available_hours)],["behind","Behind","num",r=>fmtHM(r.behind)],["library","Library"]]},
     capture:   {label:"Capture more", cols:[["target_id","Target"],["hours","Hours","num",r=>fmtH(r.hours)],["goal","Goal","num",r=>fmtH(r.goal)],["gap","Gap","num",r=>fmtH(r.gap)],["priority","Priority","num"],["library","Library"]]},
     masters:   {label:"Build masters",cols:[["class","Class"],["camera","Camera"],["temp","Temperature","num"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["frames","Frames","num"],["library","Library"]]},
-    coverage:  {label:"Calibration to shoot",cols:[["camera","Camera"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["subs","Light subs","num"],["hours","Hours","num",r=>fmtH(r.hours)],["dark_status","Dark"],["bias_status","Bias"]]},
+    coverage:  {label:"Calibration to shoot",cols:[["camera","Camera"],["gain","Gain","num"],["exp","Exposure (s)","num",r=>fmtExp(r.exp)],["subs","Light subs","num"],["hours","Hours","num",r=>fmtH(r.hours)],["temp_min","Temperature min","num"],["temp_max","Temperature max","num"],["dark_status","Dark"],["bias_status","Bias"]]},
   };
   const order = ["capture","coverage","masters","cull","integrate","restack","edit"];
   let action = order.find(a=>(WL[a]||[]).length) || "cull";
