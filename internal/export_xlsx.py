@@ -70,11 +70,12 @@ def write_sheet(ws, headers, rows, col_formats=None, freeze="A2"):
 
 
 def main():
-    here = os.path.dirname(os.path.abspath(__file__))
+    # tracker.db + the generated workbook live at the tracker root, one up.
+    tracker_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(description="Generate the tracker xlsx from tracker.db")
-    ap.add_argument("--db", default=os.path.join(here, "tracker.db"))
+    ap.add_argument("--db", default=os.path.join(tracker_root, "tracker.db"))
     ap.add_argument(
-        "--out", default=os.path.join(here, "Astrophotography tracker (generated).xlsx")
+        "--out", default=os.path.join(tracker_root, "Astrophotography tracker (generated).xlsx")
     )
     args = ap.parse_args()
 

@@ -580,8 +580,10 @@ def main():
     )
     ap.add_argument(
         "--db",
-        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker.db"),
-        help="tracker.db for calibration-match stamping (default: next to this script)",
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tracker.db"
+        ),
+        help="tracker.db for calibration-match stamping (default: at the tracker root)",
     )
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()

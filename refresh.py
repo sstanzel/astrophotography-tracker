@@ -23,7 +23,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "internal"))
 import astro_config  # noqa: E402
 
 DASHBOARD = "tracker_dashboard.html"
@@ -31,13 +31,13 @@ XLSX = "Astrophotography tracker (generated).xlsx"
 
 
 def run_step(script: str) -> None:
-    """Run a sibling tracker script, inheriting stdout; raise on failure.
+    """Run a tracker script from internal/, inheriting stdout; raise on failure.
 
     Args:
-        script: filename of the script to run (next to this one).
+        script: filename of the script to run (in internal/, below this one).
     """
     print(f"\n=== {script} ===", flush=True)
-    subprocess.run([sys.executable, os.path.join(HERE, script)], check=True)
+    subprocess.run([sys.executable, os.path.join(HERE, "internal", script)], check=True)
 
 
 def mirror(mirror_dir: str) -> None:

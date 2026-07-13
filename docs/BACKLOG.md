@@ -34,7 +34,7 @@ Problem: setting up WBPP means burrowing into deep set folders
 
 **Status:** schema built, never populated · noted 2026-07-10
 
-`schema.sql:346` defines a master↔raw-set lineage table; nothing writes it. Would
+`internal/schema.sql:346` defines a master↔raw-set lineage table; nothing writes it. Would
 record which raw sets went into a built master (the calibration analog of an
 integration's `[built]` list). Note: the `DELETE + re-walk` rebuild of
 `calibration_masters` each ingest would need rethinking if this table gains rows

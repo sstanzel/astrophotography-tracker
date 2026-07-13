@@ -2377,8 +2377,9 @@ def validate(con, locations, obs, log):
 # ==========================================================================
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
+    tracker_root = os.path.dirname(here)  # tracker.db lives at the tracker root
     ap = argparse.ArgumentParser(description="Populate the astrophotography tracker DB.")
-    ap.add_argument("--db", default=os.path.join(here, "tracker.db"))
+    ap.add_argument("--db", default=os.path.join(tracker_root, "tracker.db"))
     ap.add_argument("--schema", default=os.path.join(here, "schema.sql"))
     ap.add_argument("--xlsx", default=None, help="path to the legacy tracker xlsx")
     ap.add_argument(

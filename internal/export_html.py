@@ -18,10 +18,11 @@ import os, sys, sqlite3, argparse, json, datetime
 
 
 def main():
-    here = os.path.dirname(os.path.abspath(__file__))
+    # tracker.db + the generated dashboard live at the tracker root, one up.
+    tracker_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(description="Generate the HTML tracker dashboard.")
-    ap.add_argument("--db", default=os.path.join(here, "tracker.db"))
-    ap.add_argument("--out", default=os.path.join(here, "tracker_dashboard.html"))
+    ap.add_argument("--db", default=os.path.join(tracker_root, "tracker.db"))
+    ap.add_argument("--out", default=os.path.join(tracker_root, "tracker_dashboard.html"))
     args = ap.parse_args()
     if not os.path.exists(args.db):
         sys.exit(f"Database not found: {args.db}\nRun ingest.py first.")

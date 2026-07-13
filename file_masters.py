@@ -45,7 +45,8 @@ import re
 import shutil
 import sys
 
-import astro_config
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "internal"))
+import astro_config  # noqa: E402
 
 CAL_LIBRARY_NAME = "_Calibration Library"
 CAL_CLASSES = ("Bias", "Dark")

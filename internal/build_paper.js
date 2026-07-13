@@ -88,7 +88,8 @@ function figure(file, pxW, pxH, caption) {
   ];
 }
 
-const FIGDIR = path.join(__dirname, "..", "reports", "figures");
+// reports/ lives at _organization/, two levels up from tracker/internal/.
+const FIGDIR = path.join(__dirname, "..", "..", "reports", "figures");
 const children = [];
 
 // ---- Cover --------------------------------------------------------------
@@ -548,5 +549,5 @@ const doc = new Document({
 
 const outArg = process.argv.indexOf("--out");
 const out = outArg > -1 ? process.argv[outArg + 1]
-          : path.join(__dirname, "..", "reports", "Astrophotography_v2_organization_paper.docx");
+          : path.join(__dirname, "..", "..", "reports", "Astrophotography_v2_organization_paper.docx");
 Packer.toBuffer(doc).then(buf => { fs.writeFileSync(out, buf); console.log("Wrote:", out, buf.length, "bytes"); });

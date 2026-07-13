@@ -28,7 +28,10 @@ import argparse, os, shutil, sys
 # Configuration
 # =============================================================================
 # Library paths come from config.toml (via astro_config) — not hardcoded.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# promote_masters is a top-level sibling; astro_config lives in internal/.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.join(_HERE, "internal"))
 import astro_config  # noqa: E402
 from promote_masters import find_keepers, results_dir_for  # noqa: E402
 

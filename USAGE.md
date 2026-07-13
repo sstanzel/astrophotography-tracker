@@ -11,6 +11,12 @@ The paper explains *why*; this is *how*. Two rules carry everything:
 Run everything from this folder (`_organization/tracker/`) with every capture-library
 volume named in `config.toml` mounted.
 
+**Layout:** the tracker root holds only the commands you run (plus `config.toml` and
+the generated outputs). `internal/` is the machinery — modules the commands import and
+the scripts `refresh.py` chains (ingest, the two exports, populate_notes, validate);
+you never run those by hand in normal use. `docs/` is reference reading: STYLE.md,
+BACKLOG.md, CHECKS.md, queries.sql, and the paper PDF.
+
 ---
 
 ## Fresh start (bare git clone — new user or new machine)
@@ -239,7 +245,7 @@ nights, nested calibration sets, sessions duplicated across libraries.
 Read-only (never writes the DB or touches the libraries); run after a big
 filing pass, on the initial ingest of a new library, or a couple of times a
 season. Every check — both surfaces — is cataloged with severities and
-remedies in **CHECKS.md**. Exit code 1 when any error-severity finding exists.
+remedies in **docs/CHECKS.md**. Exit code 1 when any error-severity finding exists.
 
 ## Recording publishes & prints
 
@@ -262,9 +268,12 @@ date  = "2026-05-12"
 
 ## Script reference
 
+Commands at the tracker root — the ones you run:
+
 | Script | What it does | Key flags |
 |---|---|---|
 | `refresh.py` | The one command: ingest → dashboard + xlsx → mirror | `--no-ingest`, `--no-mirror`, `--notes` |
+| `intake.py` | Plan-first importer: device dumps → staged session folders (the step before preflight) | `--apply`, `--show-config`, `--reimport` |
 | `preflight.py` | Validate staged sessions; file the passing ones | `--apply`, `--force`, `--staging`, `--library` |
 | `worklist.py` | Print the Work Queue | `summary` (default) \| `capture coverage masters cull integrate restack edit all` |
 | `new_integration.py` | Scaffold a living multi-session integration | `--target`, `--rig`, `--span`, `--goal`, `--built`, `--apply` |
@@ -272,11 +281,17 @@ date  = "2026-05-12"
 | `file_masters.py` | File WBPP-built Bias/Dark masters next to their raws (rename to convention, sweep `master/`+`logs/`) | `--apply` |
 | `promote_masters.py` | Copy keepers into `Results/` | `--apply`, `--only` |
 | `clean_processing.py` | Empty PI scratch folders (keeper-safe) | `--apply`, `--only`, `--promote` |
-| `populate_notes.py` | Back-fill moon/weather + stamp flats/bias matches into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only`, `--db` |
-| `ingest.py` | Scan → parse → SQLite only (no exports/mirror) | `--config`, `--no-validate`, `--quiet` |
-| `export_html.py` / `export_xlsx.py` | Regenerate one output from the DB | `--db`, `--out` |
-| `validate.py` | Re-run the validation pass against the existing DB | `--db` |
-| `scrub.py` | Deep Data Health scrub (consistency anomalies; see CHECKS.md) | `--summary`, `--no-fs`, `--db` |
+| `scrub.py` | Deep Data Health scrub (consistency anomalies; see docs/CHECKS.md) | `--summary`, `--no-fs`, `--db` |
+| `bootstrap.py` | Fresh start: stamp out the `_organization/` skeleton | `--dry-run` |
+
+Machinery in `internal/` — chained by refresh or imported; run directly only when debugging:
+
+| Script | What it does | Key flags |
+|---|---|---|
+| `internal/ingest.py` | Scan → parse → SQLite only (no exports/mirror) | `--config`, `--no-validate`, `--quiet` |
+| `internal/export_html.py` / `internal/export_xlsx.py` | Regenerate one output from the DB | `--db`, `--out` |
+| `internal/populate_notes.py` | Back-fill moon/weather + stamp flats/bias matches into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only`, `--db` |
+| `internal/validate.py` | Re-run the validation pass against the existing DB | `--db` |
 
 The four mutating scripts (`preflight`, `file_masters`, `promote_masters`,
 `clean_processing`) log every `--apply` action to `_organization/dev/actions.log`
