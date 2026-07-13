@@ -34,13 +34,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import astro_config  # noqa: E402
 import intake_scan  # noqa: E402
 
+from intake_scan import (  # noqa: E402
+    calibration_sets,
+    flat_folder_name,
+    group_sessions,
+    resolve_rig,  # noqa: F401  (re-exported for tests and callers)
+    rig_is_dated,
+    LIGHT_SUBDIR,
+    FLAT_SUBDIR,
+    DARKFLAT_SUBDIR,
+    LOG_SUBDIR,
+)
+
 VALID_LAYOUTS = ("asiair", "nina")
 VALID_HASHES = ("sha256", "sha1", "md5")
 DEFAULT_LEDGER_NAME = "intake_ledger.db"
-
-# A [[rig]] block with from/to bounds is "dated"; dated entries beat the
-# open-ended entry for the same (source, camera) when the night is in range.
-WILDCARD_CAMERA = "*"
 
 
 # ==========================================================================
@@ -157,10 +165,6 @@ def load_intake_config(path: str) -> dict:
     return {"settings": settings, "sources": sources, "rigs": rigs}
 
 
-def _rig_is_dated(rig: dict) -> bool:
-    return rig["from"] is not None or rig["to"] is not None
-
-
 def _check_rig_conflicts(rigs: list[dict], errors: list[str]) -> None:
     """Flag ambiguous [[rig]] sets: overlapping dated ranges or duplicate
     open-ended entries for the same (source, camera)."""
@@ -168,10 +172,10 @@ def _check_rig_conflicts(rigs: list[dict], errors: list[str]) -> None:
     for r in rigs:
         by_key.setdefault((r["source"], r["camera"]), []).append(r)
     for (source, camera), group in by_key.items():
-        open_ended = [r for r in group if not _rig_is_dated(r)]
+        open_ended = [r for r in group if not rig_is_dated(r)]
         if len(open_ended) > 1:
             errors.append(f"[[rig]] {source}/{camera}: more than one open-ended entry")
-        dated = [r for r in group if _rig_is_dated(r)]
+        dated = [r for r in group if rig_is_dated(r)]
         for a_i, a in enumerate(dated):
             for b in dated[a_i + 1 :]:
                 a_from = a["from"] or dt.date.min
@@ -180,50 +184,6 @@ def _check_rig_conflicts(rigs: list[dict], errors: list[str]) -> None:
                 b_to = b["to"] or dt.date.max
                 if a_from <= b_to and b_from <= a_to:
                     errors.append(f"[[rig]] {source}/{camera}: dated ranges overlap")
-
-
-def resolve_rig(rigs: list[dict], source_id: str, camera: str, night: dt.date):
-    """Pick the [[rig]] entry for a (source, camera token, civil night).
-
-    Precedence: dated exact-camera → dated wildcard → open-ended exact →
-    open-ended wildcard. Dated entries match only when the night is in range.
-
-    Args:
-        rigs: parsed [[rig]] blocks.
-        source_id: the [[source]] id the frame came from.
-        camera: the camera token exactly as parsed from the filename.
-        night: the civil night being resolved.
-
-    Returns:
-        (rig, rule) — the winning entry and a human-readable one-liner naming
-        the rule (shown in the plan so a wrong mapping is visible before
-        --apply) — or (None, None) when no entry matches.
-    """
-    def in_range(r: dict) -> bool:
-        return (r["from"] or dt.date.min) <= night <= (r["to"] or dt.date.max)
-
-    tiers = (
-        [r for r in rigs if r["source"] == source_id and r["camera"] == camera
-         and _rig_is_dated(r) and in_range(r)],
-        [r for r in rigs if r["source"] == source_id and r["camera"] == WILDCARD_CAMERA
-         and _rig_is_dated(r) and in_range(r)],
-        [r for r in rigs if r["source"] == source_id and r["camera"] == camera
-         and not _rig_is_dated(r)],
-        [r for r in rigs if r["source"] == source_id and r["camera"] == WILDCARD_CAMERA
-         and not _rig_is_dated(r)],
-    )
-    for tier in tiers:
-        if tier:
-            r = tier[0]
-            if _rig_is_dated(r):
-                span = f"{r['from'] or '…'} → {r['to'] or '…'}"
-                rule = f"dated rule {span}"
-            else:
-                rule = "open-ended rule"
-            if r["camera"] == WILDCARD_CAMERA:
-                rule += ", any-camera"
-            return r, rule
-    return None, None
 
 
 # ==========================================================================
@@ -277,7 +237,7 @@ def show_config(cfg: dict, config_path: str) -> None:
     print(f"\nRig mappings ({len(cfg['rigs'])}):")
     for r in cfg["rigs"]:
         span = ""
-        if _rig_is_dated(r):
+        if rig_is_dated(r):
             span = f"  ({r['from'] or '…'} → {r['to'] or '…'})"
         adj = "  [adjacent]" if r["adjacent"] else ""
         print(
@@ -395,6 +355,329 @@ def run_census(cfg: dict, args) -> None:
 
 
 # ==========================================================================
+# Library dedupe index + preflight projection
+# ==========================================================================
+def build_library_index() -> dict:
+    """Index every session folder in every mounted configured library.
+
+    A projected session that already exists anywhere is `already in library`
+    (never copied); a same-target same-night session under a DIFFERENT name
+    (rig renamed, hand-named differently) is surfaced for review instead of
+    silently duplicated.
+
+    Returns:
+        {'names': {session name → absolute path},
+         'by_target_night': {(base target_id, date) → [session names]},
+         'libraries': [(label, path, mounted)]}
+    """
+    from ingest import SESSION_RE, parse_target_folder  # noqa: F401
+    from preflight import ADJACENT_SUFFIX
+
+    names: dict[str, str] = {}
+    by_tn: dict[tuple, list[str]] = {}
+    libraries: list[tuple[str, str, bool]] = []
+    for lib in astro_config.load_libraries():
+        mounted = os.path.isdir(lib["path"])
+        libraries.append((lib["label"], lib["path"], mounted))
+        if not mounted:
+            continue
+        for tf in sorted(os.listdir(lib["path"])):
+            tfpath = os.path.join(lib["path"], tf)
+            if tf.startswith((".", "_")) or not os.path.isdir(tfpath):
+                continue
+            for entry in sorted(os.listdir(tfpath)):
+                m = SESSION_RE.match(entry)
+                if not m or not os.path.isdir(os.path.join(tfpath, entry)):
+                    continue
+                names[entry] = os.path.join(tfpath, entry)
+                base = m.group("target")
+                if base.lower().endswith(ADJACENT_SUFFIX):
+                    base = base[: -len(ADJACENT_SUFFIX)]
+                key = (base, m.group("date"))
+                by_tn.setdefault(key, []).append(entry)
+    return {"names": names, "by_target_night": by_tn, "libraries": libraries}
+
+
+def count_library_lights(session_path: str) -> int:
+    """Light frames (kept + Rejected) in an existing library session."""
+    from ingest import walk_fits
+    from fits_parser import frame_kind
+
+    n = 0
+    for _fpath, _is_rej, m in walk_fits(session_path):
+        if m is not None and frame_kind(m) == "light":
+            n += 1
+    return n
+
+
+def load_registry_vocab() -> dict:
+    """Registry vocabularies used by the projected preflight verdict."""
+    from ingest import parse_target_folder
+    from preflight import registry_names
+
+    return {
+        "targets": {
+            parse_target_folder(name)["target_id"]: name
+            for name in registry_names("target folders")
+        },
+        "scopes": registry_names("scope_values"),
+        "sensors": registry_names("sensor_values"),
+        "combos": registry_names("scope+sensor_values"),
+    }
+
+
+def projected_preflight(session: dict, vocab: dict, staged_names: set[str]) -> tuple[str, list[str]]:
+    """The disk-independent subset of preflight's checks for a PLANNED session.
+
+    (The full check_session() needs the folder on disk; --apply runs the real
+    thing after copying. This projection covers name grammar, registry
+    membership and staging collisions so problems show before any copy.)
+
+    Returns:
+        (verdict 'ok'|'warning'|'fail', reason lines)
+    """
+    from ingest import SESSION_RE
+    from preflight import ADJACENT_SUFFIX
+
+    reasons: list[str] = []
+    verdict = "ok"
+    m = SESSION_RE.match(session["name"])
+    if not m:  # unreachable by construction; a fail here is an intake bug
+        return "fail", [f"name does not parse: {session['name']!r}"]
+
+    base = m.group("target")
+    if base.lower().endswith(ADJACENT_SUFFIX):
+        base = base[: -len(ADJACENT_SUFFIX)]
+    dest = vocab["targets"].get(base)
+    if dest:
+        reasons.append(f"destination: {dest}/")
+    else:
+        verdict = "fail"
+        line = f"target {base!r} not in the registry target folders/"
+        import difflib
+
+        close = difflib.get_close_matches(base, vocab["targets"], n=1, cutoff=0.75)
+        if close:
+            line += f" — did you mean {close[0]!r}?"
+        reasons.append(line)
+
+    rig = session["rig"]
+    for value, vocab_key, label in (
+        (rig["scope"], "scopes", "scope_values"),
+        (rig["sensor"], "sensors", "sensor_values"),
+        (f"{rig['scope']}_{rig['sensor']}", "combos", "scope+sensor_values"),
+    ):
+        if value not in vocab[vocab_key]:
+            verdict = "warning" if verdict == "ok" else verdict
+            reasons.append(f"{value!r} not in registry {label}/")
+
+    if session["name"] in staged_names:
+        verdict = "fail"
+        reasons.append("a folder with this name is already sitting in staging")
+    return verdict, reasons
+
+
+# ==========================================================================
+# Plan mode (read-only)
+# ==========================================================================
+def _session_bytes(session: dict) -> int:
+    lists = (session["lights"], session["flats"], session["darkflats"], session["logs"])
+    return sum(rec["size"] for records in lists for rec in records)
+
+
+def _mapping_lines(session: dict) -> list[str]:
+    """Per-mapping `source dir → dest dir  N files  size` lines for one session."""
+    flat_dir = flat_folder_name(session["rig"], session["night"])
+    groups = (
+        ("lights", session["lights"], LIGHT_SUBDIR),
+        ("flats", session["flats"], f"{flat_dir}/{FLAT_SUBDIR}"),
+        ("dark flats", session["darkflats"], f"{flat_dir}/{DARKFLAT_SUBDIR}"),
+        ("logs", session["logs"], LOG_SUBDIR),
+    )
+    lines = []
+    for label, records, dest in groups:
+        by_dir: dict[str, list[dict]] = {}
+        for rec in records:
+            by_dir.setdefault(os.path.dirname(rec["relpath"]) or ".", []).append(rec)
+        for src_dir, recs in sorted(by_dir.items()):
+            size = sum(r["size"] for r in recs)
+            lines.append(
+                f"{label:<10} {src_dir}/ → {dest}/   {len(recs):,} file(s)  {_gb(size)}"
+            )
+    return lines
+
+
+def render_plan(cfg: dict, args, scans: dict[str, dict]) -> int:
+    """Print the full intake plan; return the number of problems (bad exit)."""
+    settings = cfg["settings"]
+    staging = resolve_staging(settings)
+    staged_names = set()
+    if staging and os.path.isdir(staging):
+        staged_names = {d for d in os.listdir(staging) if not d.startswith(".")}
+
+    lib_index = build_library_index()
+    vocab = load_registry_vocab()
+    since = dt.date.fromisoformat(args.since) if args.since else None
+    nights = {dt.date.fromisoformat(n) for n in args.night} if args.night else None
+    plan = group_sessions(scans, cfg["rigs"], since=since, nights=nights)
+
+    print("Intake plan")
+    print(f"Config  : {args.config}")
+    state = "" if staging and os.path.isdir(staging) else "  (does not exist yet — created on --apply)"
+    print(f"Staging : {staging}{state}")
+    print(f"Ledger  : {resolve_ledger(settings)}  (not consulted — arrives in milestone M3)")
+    for label, path, mounted in lib_index["libraries"]:
+        note = "mounted" if mounted else "NOT MOUNTED — its sessions are invisible to dedupe"
+        print(f"Dedupe  : library {label} — {note}")
+
+    to_copy_sessions: list[dict] = []
+    already = 0
+    attention: list[str] = []
+    accounted_science = 0
+
+    for sid in sorted(scans):
+        sessions = [s for s in plan["sessions"] if s["source"] == sid]
+        source = next(s for s in cfg["sources"] if s["id"] == sid)
+        print(f"\n[{sid}] {source['label']} — {len(sessions)} session(s) in scope")
+
+        for sess in sessions:
+            n_frames = sum(len(sess[k]) for k in ("lights", "flats", "darkflats"))
+            accounted_science += n_frames
+            existing = lib_index["names"].get(sess["name"])
+            if existing:
+                already += n_frames
+                lib_lights = count_library_lights(existing)
+                if lib_lights == len(sess["lights"]):
+                    status = f"already in library — counts match ({lib_lights} lights)"
+                else:
+                    status = (
+                        f"already in library — count mismatch: source {len(sess['lights'])} "
+                        f"lights, library {lib_lights}"
+                    )
+                    attention.append(f"{sess['name']}: {status}")
+                print(f"  {sess['name']:<52} {status}")
+                continue
+
+            twins = [
+                n
+                for n in lib_index["by_target_night"].get(
+                    (sess["name"].split(" ")[0].removesuffix("_adjacent"),
+                     sess["night"].isoformat()),
+                    [],
+                )
+                if n != sess["name"]
+            ]
+            to_copy_sessions.append(sess)
+            print(f"\n  {sess['name']}    new session folder")
+            print(f"      rig        {sess['cam']} on {sid} → "
+                  f"{sess['rig']['scope']} + {sess['rig']['sensor']} ({sess['rule']})")
+            for line in _mapping_lines(sess):
+                print(f"      {line}")
+            stamps = f"{sess['name']} notes.toml"
+            if settings["pxiproject_template"]:
+                stamps += f" · {sess['name']}.pxiproject (from template)"
+            else:
+                stamps += " · no pxiproject template configured — project not stamped"
+            print(f"      stamps     {stamps}")
+            if sess["date_dir_mismatches"]:
+                print(
+                    f"      warning    {sess['date_dir_mismatches']} frame(s) sit in a NINA "
+                    f"date folder that differs from the computed civil night"
+                )
+            verdict, reasons = projected_preflight(sess, vocab, staged_names)
+            print(f"      preflight (projected) {verdict}" + (f" — {reasons[0]}" if reasons else ""))
+            for extra in reasons[1:]:
+                print(f"          {extra}")
+            if twins:
+                line = (
+                    f"{sess['name']}: same target+night already in the library under a "
+                    f"different name: {', '.join(twins)} — copying would duplicate that night"
+                )
+                attention.append(line)
+
+    cal_sets = calibration_sets(plan["calibration"])
+    if cal_sets:
+        print("\ncalibration — reported only, not staged (library routing arrives in a later milestone)")
+        for c in cal_sets:
+            print(
+                f"  {c['source']:<8} {c['kind']:<5} {c['exp']:<8} gain{c['gain']} "
+                f"{c['temp']}C  night {c['night']}  {c['count']:,} file(s)  {_gb(c['bytes'])}"
+            )
+
+    if plan["quarantine"]:
+        print("\nquarantine — nothing copied; fix at the source or ignore")
+        by_key = _grouped_counter(
+            plan["quarantine"],
+            lambda r: f"{r.get('source', '?')}  {os.path.dirname(r['relpath']) or '.'}/ — {r.get('reason', '?')}",
+        )
+        for line, n in by_key:
+            print(f"  {line}  ({n:,} file(s))")
+
+    if plan["unmapped"]:
+        print("\nunmapped cameras — no [[rig]] entry covers these; add one to intake.toml")
+        for grp in plan["unmapped"]:
+            print(
+                f"  {grp['source']}: camera {grp['cam']!r} on {grp['night']} — "
+                f"{len(grp['records']):,} file(s)"
+            )
+
+    if plan["unattached"]:
+        print("\nunattached — no session to host these")
+        by_key = _grouped_counter(
+            plan["unattached"], lambda r: f"{r.get('source', '?')}: {r.get('reason', '?')}"
+        )
+        for line, n in by_key:
+            print(f"  {line}  ({n:,} item(s))")
+
+    if attention:
+        print("\nattention")
+        for line in attention:
+            print(f"  {line}")
+
+    # ---- plan equation over every selected science frame -------------------
+    to_copy = sum(
+        sum(len(s[k]) for k in ("lights", "flats", "darkflats")) for s in to_copy_sessions
+    )
+    n_cal = len(plan["calibration"])
+    n_quar = len(plan["quarantine"])
+    n_unmapped = sum(len(g["records"]) for g in plan["unmapped"])
+    n_unatt = sum(1 for r in plan["unattached"] if "kind" in r)  # science only, not logs
+    remainder = plan["selected"] - (to_copy + already + n_cal + n_quar + n_unmapped + n_unatt)
+    total_bytes = sum(_session_bytes(s) for s in to_copy_sessions)
+    print(
+        f"\ntotals: {len(to_copy_sessions)} new session folder(s), {to_copy:,} frame(s) + logs, "
+        f"{_gb(total_bytes)} to copy"
+    )
+    print(
+        f"plan equation: {plan['selected']:,} science in scope = {to_copy:,} to copy + "
+        f"{already:,} already in library + {n_cal:,} calibration + {n_quar:,} quarantine + "
+        f"{n_unmapped:,} unmapped + {n_unatt:,} unattached · remainder {remainder}"
+        + (f" · {plan['filtered_out']:,} outside the night filter" if plan["filtered_out"] else "")
+    )
+    problems = 1 if remainder else 0
+    if remainder:
+        print("ERROR plan equation remainder is not zero — grouping bug, do not trust this plan")
+    print("\nplan only — nothing was copied. Apply arrives in milestone M3.")
+    return problems
+
+
+def run_plan(cfg: dict, args) -> None:
+    """Scan the selected sources and print the plan."""
+    sources = [s for s in cfg["sources"] if not args.source or s["id"] in args.source]
+    if not sources:
+        raise SystemExit(f"no source matches {args.source}")
+    scans: dict[str, dict] = {}
+    for source in sources:
+        if not os.path.isdir(source["path"]):
+            print(f"[{source['id']}] {source['label']} — NOT MOUNTED, skipped")
+            continue
+        scans[source["id"]] = intake_scan.scan_source(source, cfg["settings"])
+    if not scans:
+        raise SystemExit("no mounted sources — nothing to plan")
+    sys.exit(render_plan(cfg, args, scans))
+
+
+# ==========================================================================
 # main
 # ==========================================================================
 def main() -> None:
@@ -428,6 +711,16 @@ def main() -> None:
         action="store_true",
         help="per-file quarantine listing",
     )
+    ap.add_argument(
+        "--since",
+        help="limit to civil nights on/after this date (YYYY-MM-DD)",
+    )
+    ap.add_argument(
+        "--night",
+        action="append",
+        default=[],
+        help="limit to this civil night (YYYY-MM-DD, repeatable)",
+    )
     args = ap.parse_args()
 
     cfg = load_intake_config(args.config)
@@ -437,8 +730,7 @@ def main() -> None:
     if args.census:
         run_census(cfg, args)
         return
-
-    ap.error("the plan mode arrives in milestone M2 — use --census or --show-config")
+    run_plan(cfg, args)
 
 
 if __name__ == "__main__":

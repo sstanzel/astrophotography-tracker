@@ -19,11 +19,14 @@ Nothing here writes anything, ever.
 
 import datetime as dt
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fits_parser  # noqa: E402
 from fits_parser import frame_kind, is_non_science, safe  # noqa: E402
+
+WILDCARD_CAMERA = "*"
 
 FITS_EXTS = (".fit", ".fits", ".xisf")
 
@@ -203,5 +206,315 @@ def _classify(name: str, in_log_dir: bool, copy_chn: bool, rec: dict) -> str:
         night=civil_night(ts),
         exp=m.group("exp"),
         unit=safe(m, "unit", "s"),
+        gain=safe(m, "gain", "?"),
+        temp=safe(m, "temp", "?"),
     )
     return "science"
+
+
+# ==========================================================================
+# Rig resolution — which Scope+Sensor a (source, camera, night) maps to
+# ==========================================================================
+def rig_is_dated(rig: dict) -> bool:
+    """True when a [[rig]] entry carries a from/to bound."""
+    return rig["from"] is not None or rig["to"] is not None
+
+
+def resolve_rig(rigs: list[dict], source_id: str, camera: str, night: dt.date):
+    """Pick the [[rig]] entry for a (source, camera token, civil night).
+
+    Precedence: dated exact-camera → dated wildcard → open-ended exact →
+    open-ended wildcard. Dated entries match only when the night is in range.
+
+    Args:
+        rigs: parsed [[rig]] blocks.
+        source_id: the [[source]] id the frame came from.
+        camera: the camera token exactly as parsed from the filename.
+        night: the civil night being resolved.
+
+    Returns:
+        (rig, rule) — the winning entry and a human-readable one-liner naming
+        the rule (shown in the plan so a wrong mapping is visible before
+        --apply) — or (None, None) when no entry matches.
+    """
+
+    def in_range(r: dict) -> bool:
+        return (r["from"] or dt.date.min) <= night <= (r["to"] or dt.date.max)
+
+    tiers = (
+        [r for r in rigs if r["source"] == source_id and r["camera"] == camera
+         and rig_is_dated(r) and in_range(r)],
+        [r for r in rigs if r["source"] == source_id and r["camera"] == WILDCARD_CAMERA
+         and rig_is_dated(r) and in_range(r)],
+        [r for r in rigs if r["source"] == source_id and r["camera"] == camera
+         and not rig_is_dated(r)],
+        [r for r in rigs if r["source"] == source_id and r["camera"] == WILDCARD_CAMERA
+         and not rig_is_dated(r)],
+    )
+    for tier in tiers:
+        if tier:
+            r = tier[0]
+            if rig_is_dated(r):
+                rule = f"dated rule {r['from'] or '…'} → {r['to'] or '…'}"
+            else:
+                rule = "open-ended rule"
+            if r["camera"] == WILDCARD_CAMERA:
+                rule += ", any-camera"
+            return r, rule
+    return None, None
+
+
+# ==========================================================================
+# Grouping — science frames + logs → planned session folders
+# ==========================================================================
+# ASIAir log stamps: Autorun_Log_2026-04-19_223348.txt (PHD2 logs likewise).
+LOG_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})(\d{2})")
+
+# NINA sources nest captures under a per-night date folder; a folder date that
+# disagrees with the computed civil night means a clock or $$DATE$$-token
+# problem worth surfacing.
+DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Current library conventions (July 2026 hand-filed sessions): lights sit
+# directly in Light/, session-local calibration in "Flat <Scope> <Sensor>
+# <date>"/Flat + /Dark Flat, logs in log/.
+LIGHT_SUBDIR = "Light"
+DARKFLAT_SUBDIR = "Dark Flat"
+FLAT_SUBDIR = "Flat"
+LOG_SUBDIR = "log"
+
+
+def log_night(name: str) -> dt.date | None:
+    """The civil night an ASIAir/PHD2 log filename belongs to, or None."""
+    m = LOG_TS_RE.search(name)
+    if not m:
+        return None
+    try:
+        ts = dt.datetime.strptime(f"{m.group(1)} {m.group(2)}{m.group(3)}{m.group(4)}",
+                                  "%Y-%m-%d %H%M%S")
+    except ValueError:
+        return None
+    return civil_night(ts)
+
+
+def _night_selected(night: dt.date, since: dt.date | None, nights: set | None) -> bool:
+    if since and night < since:
+        return False
+    if nights and night not in nights:
+        return False
+    return True
+
+
+ADJACENT_SUFFIX = "_adjacent"  # matches preflight.ADJACENT_SUFFIX
+
+
+def session_folder_name(target_token: str, rig: dict, night: dt.date) -> str:
+    """The 4-token session folder name for a light group (adjacent-aware).
+
+    A rig marked adjacent appends the suffix ONLY when the capture software's
+    target name doesn't already carry it (NINA targets like "M 106 adjacent"
+    normalize to an already-suffixed id).
+    """
+    target_id = target_token.replace(" ", "_")
+    if rig["adjacent"] and not target_id.lower().endswith(ADJACENT_SUFFIX):
+        target_id += ADJACENT_SUFFIX
+    return f"{target_id} {rig['scope']} {rig['sensor']} {night.isoformat()}"
+
+
+def flat_folder_name(rig: dict, night: dt.date) -> str:
+    """The session-local calibration folder name, current library convention."""
+    return f"Flat {rig['scope']} {rig['sensor']} {night.isoformat()}"
+
+
+def _date_dir_mismatches(records: list[dict]) -> int:
+    """Count frames whose top-level NINA date folder ≠ computed civil night."""
+    n = 0
+    for rec in records:
+        top = rec["relpath"].split(os.sep, 1)[0]
+        if DATE_DIR_RE.match(top) and dt.date.fromisoformat(top) != rec["night"]:
+            n += 1
+    return n
+
+
+def group_sessions(
+    scans: dict[str, dict],
+    rigs: list[dict],
+    since: dt.date | None = None,
+    nights: set | None = None,
+) -> dict:
+    """Group scanned science frames + logs into planned session folders.
+
+    Every selected science record lands in exactly ONE of: a session's
+    lights/flats/darkflats, a calibration set (library darks/bias — reported,
+    not staged), 'quarantine' (light with no target token), 'unmapped' (no
+    [[rig]] entry covers the camera), or 'unattached' (flats with no light
+    session to host them). intake.py's plan equation enforces this.
+
+    Args:
+        scans: source id → scan_source() result.
+        rigs: parsed [[rig]] blocks.
+        since: keep only civil nights >= this date.
+        nights: keep only these civil nights.
+
+    Returns:
+        {'sessions': [...], 'calibration': [...], 'quarantine': [...],
+         'unmapped': [...], 'unattached': [...], 'selected': int,
+         'filtered_out': int} — sessions sorted by (source, night, name).
+    """
+    out: dict = {
+        "sessions": [],
+        "calibration": [],
+        "quarantine": [],
+        "unmapped": [],
+        "unattached": [],
+        "selected": 0,
+        "filtered_out": 0,
+    }
+
+    for sid, scan in sorted(scans.items()):
+        selected: list[dict] = []
+        for rec in scan["science"]:
+            if _night_selected(rec["night"], since, nights):
+                selected.append(rec)
+            else:
+                out["filtered_out"] += 1
+        out["selected"] += len(selected)
+
+        # Resolve the rig once per (camera, night); unmapped groups drop out
+        # whole so the plan can show the observed camera token verbatim.
+        by_cam_night: dict[tuple, list[dict]] = {}
+        for rec in selected:
+            by_cam_night.setdefault((rec["cam"], rec["night"]), []).append(rec)
+
+        sessions_by_key: dict[tuple, dict] = {}
+        pending_cal: list[tuple[dict, dict, list[dict]]] = []  # (rig, rule, recs) per group
+        for (cam, night), recs in sorted(by_cam_night.items()):
+            rig, rule = resolve_rig(rigs, sid, cam, night)
+            if rig is None:
+                out["unmapped"].append(
+                    {"source": sid, "cam": cam, "night": night, "records": recs}
+                )
+                continue
+
+            flat_exposures = {
+                (r["exp"], r["unit"]) for r in recs if r["kind"] == "flat"
+            }
+            cal_records: list[dict] = []
+            for rec in recs:
+                kind = rec["kind"]
+                if kind == "light":
+                    if not rec["target"]:
+                        rec["source"] = sid
+                        rec["reason"] = "light frame with no target token"
+                        out["quarantine"].append(rec)
+                        continue
+                    # Key on the normalized folder name, not the raw token —
+                    # "M 12" and "M_12" are the same target and must not
+                    # produce two sessions with one name.
+                    name = session_folder_name(rec["target"], rig, night)
+                    key = (cam, night, name)
+                    sess = sessions_by_key.get(key)
+                    if sess is None:
+                        sess = sessions_by_key[key] = {
+                            "source": sid,
+                            "cam": cam,
+                            "night": night,
+                            "rig": rig,
+                            "rule": rule,
+                            "target_token": rec["target"],
+                            "name": name,
+                            "lights": [],
+                            "flats": [],
+                            "darkflats": [],
+                            "logs": [],
+                        }
+                    sess["lights"].append(rec)
+                elif kind in ("flat", "darkflat"):
+                    cal_records.append(rec)
+                elif kind == "dark" and (rec["exp"], rec["unit"]) in flat_exposures:
+                    # ASIAir writes dark-flats as plain Dark_* files; a dark at
+                    # a flat exposure that night is a dark-flat by construction.
+                    rec["kind"] = "darkflat"
+                    cal_records.append(rec)
+                else:  # library material: long darks, bias
+                    rec["source"] = sid
+                    out["calibration"].append(rec)
+            pending_cal.append(((cam, night), rig, cal_records))
+
+        # Attach session-local calibration to ONE host per (camera, night):
+        # the last-ending session, same convention resolve_flats() expects.
+        def last_ts(sess: dict) -> dt.datetime:
+            return max(r["ts"] for r in sess["lights"])
+
+        for (cam, night), rig, cal_records in pending_cal:
+            if not cal_records:
+                continue
+            hosts = [s for s in sessions_by_key.values() if s["cam"] == cam and s["night"] == night]
+            if not hosts:
+                for rec in cal_records:
+                    rec["source"] = sid
+                    rec["reason"] = f"no light session on {night} to host session calibration"
+                out["unattached"].extend(cal_records)
+                continue
+            host = max(hosts, key=last_ts)
+            for rec in cal_records:
+                host["flats" if rec["kind"] == "flat" else "darkflats"].append(rec)
+
+        # Logs: that night's last session for the source, any camera.
+        for rec in scan["logs"]:
+            night = log_night(os.path.basename(rec["relpath"]))
+            if night is None:
+                rec["source"] = sid
+                rec["reason"] = "no timestamp recognized in log filename"
+                out["unattached"].append(rec)
+                continue
+            if not _night_selected(night, since, nights):
+                continue
+            hosts = [s for s in sessions_by_key.values() if s["night"] == night]
+            if not hosts:
+                rec["source"] = sid
+                rec["reason"] = f"no light session on {night} to host this log"
+                out["unattached"].append(rec)
+                continue
+            max(hosts, key=last_ts)["logs"].append(rec)
+
+        for sess in sessions_by_key.values():
+            sess["date_dir_mismatches"] = _date_dir_mismatches(sess["lights"])
+            out["sessions"].append(sess)
+
+    out["sessions"].sort(key=lambda s: (s["source"], s["night"], s["name"]))
+    return out
+
+
+def calibration_sets(records: list[dict]) -> list[dict]:
+    """Summarize library-calibration records (darks/bias) into display sets.
+
+    Args:
+        records: calibration-bucket records from group_sessions() (each
+            tagged with its source id).
+
+    Returns:
+        One dict per (source, camera, kind, exposure, gain, temp, night),
+        with count and bytes, sorted for display.
+    """
+    sets: dict[tuple, dict] = {}
+    for rec in records:
+        sid = rec.get("source", "?")
+        key = (sid, rec["cam"], rec["kind"], rec["exp"], rec["unit"], rec["gain"],
+               rec["temp"], rec["night"])
+        entry = sets.get(key)
+        if entry is None:
+            entry = sets[key] = {
+                "source": sid,
+                "cam": rec["cam"],
+                "kind": rec["kind"],
+                "exp": f"{rec['exp']}{rec['unit']}",
+                "gain": rec["gain"],
+                "temp": rec["temp"],
+                "night": rec["night"],
+                "count": 0,
+                "bytes": 0,
+            }
+        entry["count"] += 1
+        entry["bytes"] += rec["size"]
+    return sorted(sets.values(), key=lambda e: (e["source"], e["night"], e["kind"], e["exp"]))
