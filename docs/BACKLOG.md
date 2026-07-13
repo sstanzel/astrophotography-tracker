@@ -19,12 +19,12 @@ Problem: setting up WBPP means burrowing into deep set folders
 100+ raws. Design decided:
 
 - Canonical master stays **in its set folder next to the raws** (unchanged — pairing,
-  staleness, and phantom-row avoidance in `ingest.py` all depend on this; see
+  staleness, and phantom-row avoidance in `internal/scan.py` all depend on this; see
   `has_master_file()` and the bias/dark walkers).
 - Add a generated `_Masters/` shelf at the calibration library root: a flat folder of
   **copies** (not symlinks — Alienware/SMB may not resolve Mac symlinks) of every
   `master*` file, rebuilt by `refresh.py` (or a small `shelve_masters.py`). Leading
-  `_` keeps it invisible to ingest (top-level `_`-prefixed folders are skipped).
+  `_` keeps it invisible to the scan (top-level `_`-prefixed folders are skipped).
 - The shelf is a derived artifact like the dashboard — never hand-maintained, safe to
   delete, rebuilt next refresh. ~40 lines of code.
 - Deferred 2026-07-11: may not be needed; revisit after actually building the first
@@ -37,23 +37,23 @@ Problem: setting up WBPP means burrowing into deep set folders
 `internal/schema.sql:346` defines a master↔raw-set lineage table; nothing writes it. Would
 record which raw sets went into a built master (the calibration analog of an
 integration's `[built]` list). Note: the `DELETE + re-walk` rebuild of
-`calibration_masters` each ingest would need rethinking if this table gains rows
-(comment at `ingest.py` ~line 1230). Only worth it if "what built this master?"
+`calibration_masters` each scan would need rethinking if this table gains rows
+(comment at `internal/scan.py` ~line 1230). Only worth it if "what built this master?"
 becomes a real question.
 
-## Derive `[built]` from the master's XISF metadata (retire `mark_integrated.py`)
+## Derive `[built]` from the master's XISF metadata (retire `integration.py mark`)
 
 **Status:** idea · 2026-07-11
 
 `[built]` is the system's one manual attestation — which sessions are physically
 inside the current master. PixInsight embeds its input file list in the master's
-XISF metadata, so in principle ingest could parse the master in `Results/` and
+XISF metadata, so in principle the scan could parse the master in `Results/` and
 derive `[built]` the way it derives everything else: attest nothing. Would retire
-`mark_integrated.py` (and the `--built` scaffold flag). Real work: XISF header
+`integration.py mark` (and the `--built` scaffold flag). Real work: XISF header
 parsing, mapping embedded file paths back to session folders (paths differ across
 machines/volumes), and PI Magic Studio may not embed the same metadata — verify
-both stackers before starting. Considered 2026-07-11 when weighing whether to merge
-`mark_integrated.py` into `new_integration.py` (answer: no — merged, a prefilled
+both stackers before starting. Considered 2026-07-11 when weighing whether to prefill
+`[built]` at scaffold time (answer: no — a prefilled
 `[built]` at scaffold time would silence the Restack signal; added `--built` for
 retroactive scaffolds instead).
 
@@ -66,6 +66,19 @@ STYLE.md, this file) with one-line descriptions. Deferred until there are enough
 documents to need a front door; also settled then: USAGE.md stays in `tracker/`
 (docs version with the code they describe; `reports/` is publication artifacts).
 
+## Document the session-definition deviation (paper section 11 candidate)
+
+**Status:** note for the paper - 2026-07-13
+
+The processing literature defines a "session" as an unbroken optical-train state -
+all lights collected until something invalidates the flats (camera rotation,
+removal, filter change) - which can span multiple nights. The tracker's session is
+target+rig+one civil night, baked into the folder grammar. Deliberate deviation:
+the night is the schedulable unit, and the literature's concept (a flats-validity
+epoch crossing nights) is modeled instead by the flats machinery - `here` /
+`with sibling` / `nearest` resolution and the `[calibration] flats` pointer.
+Worth one paragraph in the paper when next revised.
+
 ## Paper rev-3: fold in the 2026-07-11 calibration rework
 
 **Status:** ready when next revising · 2026-07-11
@@ -76,33 +89,38 @@ The rev-2 paper still describes bias matching as per-camera, the separate
 require_bias` recipe switch, the merged single coverage panel, masters-live-with-raws
 (no `Bias Masters/` folders — also removed from the `!Camera` template), and the
 newest-set-per-(camera, gain/ISO) bias retention policy. Also fold in the
-HEAD
-data-quality checks catalog (CHECKS.md, added 2026-07-12 with scrub.py) as the
+data-quality checks catalog (CHECKS.md, added 2026-07-12 alongside audit.py, then named scrub.py) as the
 paper's reviewable list of every anomaly the system looks for.
 
-## Ingest: don't count frames inside PI Process/ + PI Magic/ scratch
+Added 2026-07-13: the paper also predates the layout reorg (root commands /
+`internal/` / `docs/`) and the one-word verb renames (scrub->audit,
+file_masters->catalog, promote_masters->promote, clean_processing->sweep,
+new_integration+mark_integrated->integration new|mark, ingest->internal/scan) -
+every script name the paper mentions needs the new vocabulary at rev-3.
+
+## Scan: don't count frames inside PI Process/ + PI Magic/ scratch
 
 **Status:** ready · 2026-07-12
 
-The first scrub.py run found 3 lights counted from `PI Magic/…/Discarded/`
+The first audit run (2026-07-12, as scrub.py) found 3 lights counted from `PI Magic/…/Discarded/`
 copies (SCRATCH_FRAME) — each also fires DUPLICATE_FRAME because the original
 is still in `Light/`, so integration hours are inflated (~0.25 h today). Right
-fix is at the source: the ingest session walker should skip the `PI Process/`
+fix is at the source: the scan session walker should skip the `PI Process/`
 and `PI Magic/` subtrees entirely (they are recreatable scratch, same rationale
-as `clean_processing.py`). Keep both scrub checks afterwards as regression
-guards. Interim workaround: `clean_processing.py --apply` then re-ingest.
+as `sweep.py`). Keep both audit checks afterwards as regression
+guards. Interim workaround: `sweep.py --apply` then re-scan.
 
-## Graduate scrub error checks into every-ingest validate()
+## Graduate audit error checks into every-scan validate()
 
 **Status:** idea · 2026-07-12
 
-scrub.py's error-severity checks (DUPLICATE_FRAME, SCRATCH_FRAME, MIXED_CAMERA,
+audit.py's error-severity checks (DUPLICATE_FRAME, SCRATCH_FRAME, MIXED_CAMERA,
 ZERO_BYTE_FRAME, UNDERSIZED_FRAME) are cheap DB queries and catch
-wrong-totals bugs — candidates for running in every ingest's validate() so
-they surface on the dashboard's Data Health panel, with scrub.py remaining the
+wrong-totals bugs — candidates for running in every scan's validate() so
+they surface on the dashboard's Data Health panel, with audit.py remaining the
 place for the judgment-call warnings/info (mixed settings, reject rates,
 rotation drift) and the cross-library disk pass. Decide after living with the
-scrub for a while.
+audit for a while.
 
 2026-07-12 per-session match columns: `resolve_flats()` (here / with sibling /
 nearest / none) and `resolve_bias()` (newest camera+gain set, any date), both

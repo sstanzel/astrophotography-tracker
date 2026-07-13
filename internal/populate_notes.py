@@ -23,7 +23,7 @@ night, the moon fields still get filled.
 Calibration matches are the exception: flats_match/bias_match are tracker-owned
 and REFRESHED on every run (a new bias set or a filed flat changes the match),
 inserted into the [calibration] section if the file predates those keys. They
-come from tracker.db, so they reflect the last ingest; run ingest.py first (or
+come from tracker.db, so they reflect the last scan; run refresh.py first (or
 accept refresh.py --notes's one-cycle lag). No tracker.db -> stamping is skipped.
 
 How the night window is found
@@ -444,7 +444,7 @@ def load_calibration_matches(db_path):
     """Read every session's resolved flat + bias match from tracker.db.
 
     Args:
-        db_path: path to tracker.db (written by ingest.py).
+        db_path: path to tracker.db (written by scan.py).
 
     Returns:
         Dict of session folder name -> {"flats_match": str|None,

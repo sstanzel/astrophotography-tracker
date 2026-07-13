@@ -198,7 +198,7 @@ def test_log_night_parses_asiair_stamp():
 
 
 def test_session_folder_name_matches_grammar():
-    from ingest import SESSION_RE
+    from scan import SESSION_RE
 
     name = session_folder_name("M 5", RIG, dt.date(2026, 7, 8))
 

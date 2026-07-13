@@ -2,12 +2,12 @@
 """
 refresh.py - one command to update the tracker end to end.
 
-Runs, in order: ingest.py (rescan the libraries into tracker.db) ->
+Runs, in order: internal/scan.py (rescan the libraries into tracker.db) ->
 export_html.py (dashboard) -> export_xlsx.py (workbook) -> copy both generated
 files to the offline mirror (the [mirror] path in config.toml, e.g. OneDrive).
 
     python3 refresh.py                # full refresh
-    python3 refresh.py --no-ingest    # only re-render + mirror (after editing a
+    python3 refresh.py --no-scan    # only re-render + mirror (after editing a
                                       #   manifest/notes; skips the library scan)
     python3 refresh.py --no-mirror    # ingest + render, but don't copy to mirror
 
@@ -57,7 +57,7 @@ def main() -> None:
         description="Ingest, regenerate the dashboard + xlsx, and mirror them."
     )
     ap.add_argument(
-        "--no-ingest", action="store_true", help="skip the library scan; only re-render and mirror"
+        "--no-scan", action="store_true", help="skip the library scan; only re-render and mirror"
     )
     ap.add_argument(
         "--no-mirror", action="store_true", help="don't copy the outputs to the [mirror] path"
@@ -72,8 +72,8 @@ def main() -> None:
 
     if args.notes:
         run_step("populate_notes.py")
-    if not args.no_ingest:
-        run_step("ingest.py")
+    if not args.no_scan:
+        run_step("scan.py")
     run_step("export_html.py")
     run_step("export_xlsx.py")
 

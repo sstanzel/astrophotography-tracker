@@ -409,7 +409,7 @@ def build_library_index() -> dict:
          'by_target_night': {(base target_id, date) → [session names]},
          'libraries': [(label, path, mounted)]}
     """
-    from ingest import SESSION_RE, parse_target_folder  # noqa: F401
+    from scan import SESSION_RE, parse_target_folder  # noqa: F401
     from preflight import ADJACENT_SUFFIX
 
     names: dict[str, str] = {}
@@ -439,7 +439,7 @@ def build_library_index() -> dict:
 
 # Recreatable working folders inside a session — copies of frames in there
 # (PI Magic's Discarded/, PixInsight scratch) must not inflate the dedupe
-# light count. Same concern as scrub.py's SCRATCH_FRAME check.
+# light count. Same concern as audit.py's SCRATCH_FRAME check.
 SCRATCH_DIR_MARKERS = ("PI Process", "PI Magic")
 SCRATCH_DIR_SUFFIXES = (".pxiproject", " Results")
 
@@ -467,7 +467,7 @@ def count_library_lights(session_path: str) -> int:
 
 def load_registry_vocab() -> dict:
     """Registry vocabularies used by the projected preflight verdict."""
-    from ingest import parse_target_folder
+    from scan import parse_target_folder
     from preflight import registry_names
 
     return {
@@ -491,7 +491,7 @@ def projected_preflight(session: dict, vocab: dict, staged_names: set[str]) -> t
     Returns:
         (verdict 'ok'|'warning'|'fail', reason lines)
     """
-    from ingest import SESSION_RE
+    from scan import SESSION_RE
     from preflight import ADJACENT_SUFFIX
 
     reasons: list[str] = []

@@ -7,8 +7,8 @@ check that works from the database — the Tier 1/2/3 checks on sessions, frames
 targets and calibration_masters — and rebuilds the validation_findings table.
 
 Three filesystem-structural checks (UNPARSED_SESSION_NAME, CAL_EMPTY,
-CAL_NAMING) only run inside a full ingest.py run, because they depend on
-walking folders that have no row in the database. Run ingest.py for those.
+CAL_NAMING) only run inside a full scan, because they depend on
+walking folders that have no row in the database. Run refresh.py for those.
 
 Usage (from the tracker root):
     python3 internal/validate.py [--db PATH]
@@ -19,9 +19,9 @@ import os
 import sqlite3
 import sys
 
-# validate.py shares ingest.py's validation function and helpers.
+# validate.py shares scan.py's validation function and helpers.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ingest import validate, load_locations  # noqa: E402
+from scan import validate, load_locations  # noqa: E402
 import astro_config  # noqa: E402
 
 
@@ -39,7 +39,7 @@ def main():
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
-        sys.exit(f"Database not found: {args.db}\nRun ingest.py first to build it.")
+        sys.exit(f"Database not found: {args.db}\nRun refresh.py first to build it.")
 
     con = sqlite3.connect(args.db)
     con.execute("PRAGMA foreign_keys = ON")
@@ -50,7 +50,7 @@ def main():
     print(f"Validating {args.db}")
     by = validate(con, locations, {}, print)
     print(f"\n{by['error']} errors, {by['warning']} warnings, {by['info']} info")
-    print("(UNPARSED_SESSION_NAME / CAL_EMPTY / CAL_NAMING run only in a full " "ingest.py run.)")
+    print("(UNPARSED_SESSION_NAME / CAL_EMPTY / CAL_NAMING run only in a full " "scan.)")
     con.close()
 
 

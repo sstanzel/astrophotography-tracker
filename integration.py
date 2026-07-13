@@ -1,0 +1,363 @@
+#!/usr/bin/env python3
+"""
+integration.py - manage living multi-session (or composite) integrations.
+(Formerly new_integration.py + mark_integrated.py.)
+
+Two subcommands around one noun:
+
+  new   Scaffold  {target}/integrations/{target_id} {rig|composite} {span}/
+        containing empty PI Process/, PI Magic/ and Results/ folders, plus an
+        integration.toml with a rule-based [membership] section. The tracker
+        resolves the member sessions from that rule (rig + span) on every scan,
+        so the integration grows automatically as you add nights - no member
+        list to maintain and no version churn.
+
+  mark  Record what you just stacked into the integration's master. Run it on
+        the folder after each (re)build in PixInsight / PI Magic Studio: it
+        snapshots the sessions currently matching the rule into the
+        [built].sessions list, so the tracker knows what is in the current
+        master (built hours) versus what has been captured since (the "stale"
+        gap). data_through is derived from the newest built session, and how it
+        was stacked is auto-detected - you record nothing but the session list.
+        The rest of the manifest ([membership], [pipeline], [notes]) is left
+        untouched. For a pinned integration the snapshot is the pinned member
+        list; adjust by hand if you deliberately stacked a different subset.
+
+Both preview by default; pass --apply to write.
+
+    python3 integration.py new --target "M 81 Bodes Galaxy" \\
+        --rig "RASA8 ASI2600MCAir" --span all --goal 50 --apply
+    python3 integration.py new --target "M 81 Bodes Galaxy" --span 2026   # composite
+    python3 integration.py mark "<integration folder>"                    # preview
+    python3 integration.py mark "<integration folder>" --apply
+    python3 integration.py mark "<integration folder>" --apply --clear    # empty [built]
+
+For a retroactive scaffold - the master already exists and contains exactly the
+sessions the rule matches today - add --built to `new` to also record them in
+[built], skipping the separate `mark` step. Never use --built before stacking:
+[built] means "physically in the current master", and prefilling it silences the
+Restack signal the empty list exists to raise.
+"""
+
+import argparse
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "internal"))
+import astro_config  # noqa: E402
+import scan  # noqa: E402  (SESSION_RE, read_integration_toml, resolve_auto_members)
+
+
+# ==========================================================================
+# new - scaffold a living integration
+# ==========================================================================
+def find_target(target_name, libraries):
+    """Return the target folder path across the configured libraries, or None."""
+    for lib in libraries:
+        p = os.path.join(lib["path"], target_name)
+        if os.path.isdir(p):
+            return p
+    return None
+
+
+def span_matches(date, span):
+    """True if a YYYY-MM-DD date falls within a span: '2026', '2024-2026', 'all'."""
+    if span == "all":
+        return True
+    year = date[:4]
+    m = re.fullmatch(r"(\d{4})-(\d{4})", span)
+    if m:
+        return m.group(1) <= year <= m.group(2)
+    return year == span
+
+
+def select_members(target_path, span, rig):
+    """Return (members, rigs) matching the span (and rig, if given).
+
+    Args:
+        target_path: absolute path of the target folder.
+        span: '2026' | a range | 'all'.
+        rig: '<scope> <sensor>' to require one rig, or '' for any (composite).
+
+    Returns:
+        (sorted member folder names, set of '<scope> <sensor>' rigs seen).
+    """
+    members, rigs = [], set()
+    for sname in sorted(os.listdir(target_path)):
+        if sname == "integrations" or sname.startswith((".", "_")):
+            continue
+        if not os.path.isdir(os.path.join(target_path, sname)):
+            continue
+        m = scan.SESSION_RE.match(sname)
+        if not m or not span_matches(m.group("date"), span):
+            continue
+        this_rig = f"{m.group('scope')} {m.group('sensor')}"
+        if rig and this_rig != rig:
+            continue
+        members.append(sname)
+        rigs.add(this_rig)
+    return members, rigs
+
+
+def build_manifest(rig, span, goal_hours, built_sessions=None):
+    """Render a rule-based integration.toml for a living integration.
+
+    Args:
+        rig: '<scope> <sensor>' or '' for a composite.
+        span: the span string.
+        goal_hours: optional integration-hours goal, or None.
+        built_sessions: sessions already stacked into an existing master
+            (retroactive scaffold via --built), or None for the normal
+            empty [built].
+
+    Returns:
+        The manifest file contents.
+    """
+    lines = [
+        "# Integration manifest — see tracker/templates/integration.toml",
+        "# for the documented format. Generated by integration.py new.",
+        "",
+        "[membership]",
+        "# mode = auto: the tracker resolves members from rig + span every scan,",
+        "# so this integration grows automatically as you add nights.",
+        'mode = "auto"',
+    ]
+    if rig:
+        lines.append(f'rig  = "{rig}"          # scope+sensor; omit for a composite')
+    else:
+        lines.append("# rig omitted → composite (all rigs for this target/span)")
+    lines.append(f'span = "{span}"')
+    if goal_hours is not None:
+        lines.append(f"goal_hours = {goal_hours:g}")
+    lines += [
+        "",
+        "[built]",
+        "# Sessions actually stacked into the current master. Fill this with",
+        "# `integration.py mark` after each stack (or by hand).",
+        "sessions = [",
+    ]
+    lines += [f'  "{s}",' for s in (built_sessions or [])]
+    lines += [
+        "]",
+        "",
+        "[pipeline]",
+        "edited       = false",
+        "published    = false",
+        "printed      = false",
+        'astrobin_url = ""',
+        "",
+        "[notes]",
+        'notes = """',
+        '"""',
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def cmd_new(args):
+    """Scaffold the integration folder + manifest (preview unless --apply)."""
+    libraries = astro_config.load_libraries(args.config)
+    tpath = find_target(args.target, libraries)
+    if not tpath:
+        sys.exit(f"Target folder not found in any configured library: {args.target}")
+
+    members, rigs = select_members(tpath, args.span, args.rig)
+    if not members:
+        sys.exit(
+            f"No sessions matched span '{args.span}'"
+            + (f" / rig '{args.rig}'" if args.rig else "")
+            + f" under {args.target}."
+        )
+
+    target_id = scan.SESSION_RE.match(members[0]).group("target")
+    kind = "multi-session" if args.rig or len(rigs) == 1 else "composite"
+    rig_label = args.rig if args.rig else "composite"
+    folder = f"{target_id} {rig_label} {args.span}"
+    dest = os.path.join(tpath, "integrations", folder)
+
+    print(f"Target      : {args.target}")
+    print(f"Integration : {folder}   ({kind}, {len(rigs)} rig(s))")
+    print(
+        f"Rule        : mode=auto, rig={args.rig or '(any)'}, span={args.span}"
+        + (f", goal={args.goal:g}h" if args.goal is not None else "")
+    )
+    if args.built:
+        print("Built       : retroactive — today's matches will be recorded as " "already stacked")
+    print(f"Matches today ({len(members)} sessions):")
+    for ms in members:
+        print(f"  {ms}")
+
+    if os.path.exists(dest):
+        sys.exit(f"\nERROR: integration folder already exists:\n  {dest}")
+
+    if not args.apply:
+        print(
+            f"\nDRY RUN — nothing created. Re-run with --apply to create:\n"
+            f"  integrations/{folder}/  "
+            f"(PI Process/, PI Magic/, '{folder} Results/', integration.toml)"
+        )
+        return
+
+    os.makedirs(os.path.join(dest, "PI Process"))
+    os.makedirs(os.path.join(dest, "PI Magic"))
+    os.makedirs(os.path.join(dest, f"{folder} Results"))
+    with open(os.path.join(dest, "integration.toml"), "w", encoding="utf-8") as fh:
+        fh.write(build_manifest(args.rig, args.span, args.goal, members if args.built else None))
+
+    print(f"\nCreated: {dest}")
+    if args.built:
+        print(
+            f"Recorded {len(members)} session(s) in [built]. "
+            "Re-run refresh.py to update the tracker."
+        )
+    else:
+        print(
+            "Next: build it in PixInsight in that folder, then run\n"
+            f'  python3 integration.py mark "{dest}"\n'
+            "and re-run refresh.py."
+        )
+
+
+# ==========================================================================
+# mark - record what went into the master
+# ==========================================================================
+def resolve_available(integration_dir, man):
+    """Return the session folder names this integration should contain now.
+
+    Args:
+        integration_dir: absolute path of the integration folder.
+        man: the parsed integration.toml dict.
+
+    Returns:
+        Sorted list of member session folder names.
+    """
+    target_path = os.path.dirname(os.path.dirname(os.path.normpath(integration_dir)))
+    mode = man["mode"] or ("pinned" if man["members"] else "auto")
+    if mode == "pinned":
+        return list(man["members"] or man["built_sessions"])
+    return scan.resolve_auto_members(target_path, man["rig"], man["span"], man["exclude"])
+
+
+def set_array(text, key, items):
+    """Replace `key = [ ... ]` with a formatted list. Returns (text, replaced?)."""
+    block = f"{key} = [\n" + "".join(f'  "{it}",\n' for it in items) + "]"
+    new, n = re.subn(r"(?ms)^" + key + r"\s*=\s*\[.*?\]", lambda _m: block, text)
+    return new, n > 0
+
+
+def apply_built(text, sessions):
+    """Write the [built] sessions list into the manifest text.
+
+    Falls back to appending a fresh [built] section if the key is absent.
+
+    Args:
+        text: current manifest contents.
+        sessions: member folder names to record as built.
+
+    Returns:
+        Updated manifest text.
+    """
+    text, ok = set_array(text, "sessions", sessions)
+    if ok:
+        return text
+    section = ["", "[built]", "sessions = ["] + [f'  "{s}",' for s in sessions] + ["]", ""]
+    return text.rstrip("\n") + "\n" + "\n".join(section)
+
+
+def cmd_mark(args):
+    """Snapshot the built sessions into the manifest (preview unless --apply)."""
+    idir = args.integration_dir
+    mpath = os.path.join(idir, "integration.toml")
+    if not os.path.isfile(mpath):
+        sys.exit(f"No integration.toml in: {idir}")
+
+    man = scan.read_integration_toml(mpath)
+    sessions = [] if args.clear else resolve_available(idir, man)
+
+    dates = [
+        scan.SESSION_RE.match(s).group("date") for s in sessions if scan.SESSION_RE.match(s)
+    ]
+    data_through = max(dates) if dates else None
+
+    print(f"Integration : {os.path.basename(os.path.normpath(idir))}")
+    print(
+        f"Built       : {len(sessions)} session(s)"
+        + (f", data through {data_through}" if data_through else "")
+    )
+    for s in sessions:
+        print(f"  {s}")
+
+    if not args.apply:
+        print(
+            "\nDRY RUN — nothing written. Re-run with --apply to record this, "
+            "then run refresh.py."
+        )
+        return
+
+    text = open(mpath, encoding="utf-8").read()
+    new_text = apply_built(text, sessions)
+    tmp = mpath + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(new_text)
+    os.replace(tmp, mpath)
+    print(f"\nRecorded in {mpath}\nRe-run refresh.py to update the tracker.")
+
+
+# ==========================================================================
+# Main
+# ==========================================================================
+def main():
+    ap = argparse.ArgumentParser(
+        description="Scaffold ('new') or record ('mark') a living multi-session integration."
+    )
+    sub = ap.add_subparsers(dest="command", required=True)
+
+    ap_new = sub.add_parser("new", help="scaffold a living integration folder + manifest")
+    ap_new.add_argument(
+        "--target", required=True, help="target folder name, e.g. 'M 81 Bodes Galaxy'"
+    )
+    ap_new.add_argument("--span", required=True, help="'2026' | a range like '2024-2026' | 'all'")
+    ap_new.add_argument(
+        "--rig",
+        default="",
+        help="one rig 'scope sensor', e.g. 'RASA8 ASI2600MCAir'; "
+        "omit for a composite across rigs",
+    )
+    ap_new.add_argument(
+        "--goal",
+        type=float,
+        default=None,
+        help="integration-hours goal for the dashboard (e.g. 50)",
+    )
+    ap_new.add_argument(
+        "--built",
+        action="store_true",
+        help="retroactive scaffold: a master containing exactly today's "
+        "matches already exists — also record them in [built] "
+        "(instead of running `integration.py mark` after)",
+    )
+    ap_new.add_argument(
+        "--apply", action="store_true", help="actually create the folder (default: preview only)"
+    )
+    ap_new.add_argument(
+        "--config", default=None, help="path to config.toml (default: next to this script)"
+    )
+    ap_new.set_defaults(func=cmd_new)
+
+    ap_mark = sub.add_parser("mark", help="record the sessions stacked into the master")
+    ap_mark.add_argument("integration_dir", help="path to the integration folder")
+    ap_mark.add_argument(
+        "--clear", action="store_true", help="empty [built] (mark nothing as stacked)"
+    )
+    ap_mark.add_argument(
+        "--apply", action="store_true", help="write the manifest (default: preview only)"
+    )
+    ap_mark.set_defaults(func=cmd_mark)
+
+    args = ap.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

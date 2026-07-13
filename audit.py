@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-scrub.py — deep Data Health scrub for the occasional "spring cleaning" pass.
+audit.py — deep Data Health audit for the occasional "spring cleaning" pass.
+(Formerly scrub.py.)
 
-Where ingest.py's validate() checks *structure* every run (naming, dates,
-registry membership, manifests), this scrub audits *consistency* — the
+Where scan.py's validate() checks *structure* every run (naming, dates,
+registry membership, manifests), this audit checks *consistency* — the
 anomalies that hide inside otherwise well-formed sessions: mixed capture
 settings, double-counted frames, cooler failures, cross-library duplicates.
 Run it after a big filing pass, before a reorganization, or whenever the
@@ -11,13 +12,13 @@ library deserves a full physical. Every check is cataloged in CHECKS.md.
 
 Read-only: reads tracker.db (plus one folder-name pass over the mounted
 library roots recorded in the DB). Never writes the database, never touches
-the libraries. Run ingest.py first so the DB reflects the current disk.
+the libraries. Run refresh.py first so the DB reflects the current disk.
 
 Usage:
-    python3 scrub.py              # summary + every finding
-    python3 scrub.py --summary    # check-by-check counts only
-    python3 scrub.py --db PATH    # a tracker.db somewhere else
-    python3 scrub.py --no-fs      # skip the filesystem pass (DB checks only)
+    python3 audit.py              # summary + every finding
+    python3 audit.py --summary    # check-by-check counts only
+    python3 audit.py --db PATH    # a tracker.db somewhere else
+    python3 audit.py --no-fs      # skip the filesystem pass (DB checks only)
 
 Exit code: 1 if any error-severity finding, else 0.
 """
@@ -503,7 +504,7 @@ def fmt_exps(vals: str) -> str:
 
 
 def run_checks(con: sqlite3.Connection, include_fs: bool) -> list[Finding]:
-    """Run every scrub check and return the combined findings.
+    """Run every audit check and return the combined findings.
 
     Args:
         con: Open connection to tracker.db.
@@ -523,14 +524,14 @@ def run_checks(con: sqlite3.Connection, include_fs: bool) -> list[Finding]:
 
 
 def print_report(findings: list[Finding], summary_only: bool) -> None:
-    """Print the scrub report: summary counts, then per-check detail."""
+    """Print the audit report: summary counts, then per-check detail."""
     by = {"error": 0, "warning": 0, "info": 0}
     per_check: dict[str, int] = {}
     for sev, code, _, _ in findings:
         by[sev] += 1
         per_check[code] = per_check.get(code, 0) + 1
 
-    print("Data Health scrub")
+    print("Data Health audit")
     print(f"    {by['error']} errors, {by['warning']} warnings, {by['info']} info\n")
     if not findings:
         print("Clean bill of health — no findings.")
@@ -558,7 +559,7 @@ def print_report(findings: list[Finding], summary_only: bool) -> None:
 
 def main() -> None:
     here = os.path.dirname(os.path.abspath(__file__))
-    ap = argparse.ArgumentParser(description="Deep Data Health scrub over an existing tracker.db.")
+    ap = argparse.ArgumentParser(description="Deep Data Health audit over an existing tracker.db.")
     ap.add_argument("--db", default=os.path.join(here, "tracker.db"))
     ap.add_argument("--summary", action="store_true", help="check-by-check counts only")
     ap.add_argument(
@@ -567,7 +568,7 @@ def main() -> None:
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
-        sys.exit(f"Database not found: {args.db}\nRun ingest.py first to build it.")
+        sys.exit(f"Database not found: {args.db}\nRun refresh.py first to build it.")
     con = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     findings = run_checks(con, include_fs=not args.no_fs)
     con.close()
