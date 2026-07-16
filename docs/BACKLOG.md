@@ -128,6 +128,36 @@ surfaced on the Sessions table and stamped into notes.toml as
 `flats_match`/`bias_match`.
 worktree-bias-match
 
+## Intake walk phase: undo, calibration routing, preflight chaining
+
+**Status:** designed · 2026-07-15
+
+Crawl (M0–M5, `intake` branch) is built and verified: config-driven sources/
+rigs/ignores, census, plan with library dedupe, verified copies + ledger,
+`--reimport`, `--audit [--deep]`. Deliberately deferred to walk:
+
+- `--undo RUN_ID` — hash-check each dest against the ledger sha before
+  deleting (refuse per-file if edited/culled; refuse entirely once filed into
+  the library); mark rows `reverted`, drop empty session dirs from `dirs`.
+  The ledger schema already records everything undo needs.
+- Calibration auto-routing — long darks/bias sets (today: reported only) filed
+  into `_Calibration Library/{Dark|Bias}/{Camera}/…` per the existing
+  conventions. Also ad-hoc camera dumps like the `R5 calibration/` CR3 folder
+  (2026-07-15) — native raws with no filename grammar, out of intake's
+  session world entirely.
+- `--file` — chain `preflight.py --apply` after a clean apply (one command
+  from device dump to filed library).
+- NINA-side guide logs: sources point at `…/NINA`, so PHD2 logs elsewhere on
+  the Mele boxes aren't seen; decide whether to widen source roots or add a
+  log-dir key per source.
+- `$$TARGETNAME$$` + no-target lights (Mele quarantine, 160 frames as of
+  2026-07-15): a config mechanism to hand-attribute a quarantined folder to a
+  target/session (never guessed automatically).
+
+Run phase (later): filename grammars + device layout profiles fully config-
+driven (new capture software = config edit, not a fits_parser change);
+dashboard "last import" tile from the ledger `runs` table.
+
 ## Open design questions (paper §11)
 
 **Status:** ideas, undecided · as of rev-2 paper 2026-07-10

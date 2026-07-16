@@ -56,11 +56,49 @@ freshness rules in `../calibration_thresholds.toml`.
 `integration.toml` manifest template — single copies, git-tracked; the
 populated files they become live out in the libraries.
 
+## Importing a capture night (intake)
+
+CCC clones each capture device into the import area; `intake.py` turns those
+device dumps into correctly-named staged session folders. The import area is
+**never modified** — intake only reads it; the only writes are verified copies
+into staging plus ledger rows. Everything device-specific ([[source]] roots,
+[[rig]] camera→Scope+Sensor mappings with date-ranged swap overrides,
+[[ignore]] never-imports) lives in `_organization/intake.toml` (template:
+`templates/intake.example.toml`) — none of it in code.
+
+```bash
+python3 intake.py                     # THE PLAN (read-only): sessions to create, per-folder
+                                      #   file counts + sizes, rig resolutions, dedupe against
+                                      #   every mounted library, projected preflight verdicts,
+                                      #   quarantine/unmapped/attention, and a census equation
+                                      #   that accounts for every file (remainder must be 0)
+python3 intake.py --apply             # execute it: copy → hash-verify → atomic rename →
+                                      #   ledger row; stamps notes.toml + the .pxiproject
+                                      #   template; prints the REAL preflight verdict per session
+python3 intake.py --source air2600 --night 2026-07-08   # narrow to a source / night (--since too)
+python3 intake.py --census            # classification-only census of the sources
+python3 intake.py --audit             # every ledgered copy still exists, sizes match (fast)
+python3 intake.py --audit --deep      # ...and re-hash everything against stored digests (slow)
+python3 intake.py --reimport          # re-offer copies that vanished (deleted staging by hand)
+python3 intake.py --show-config       # parsed sources, rig table, resolved paths
+```
+
+Safety model: a file is offered until a verified copy of it exists (ledger row
+⇔ hash-verified copy); collisions are never overwritten (`held` + attention);
+an interrupted run self-heals (`.part` leftovers cleaned, unledgered files
+simply re-offer); sessions already in a library are never re-copied (with a
+light-count cross-check); a same-target+night session under a different name
+raises a would-duplicate warning instead of copying. Autorun/PHD2 logs copy to
+the night's LAST session (`log/`) — one home per night, even when guiding
+spanned targets. Long darks/bias are reported as calibration sets, not staged.
+The ledger (`_organization/intake_ledger.db`) is durable primary state —
+unlike tracker.db, never delete it casually.
+
 ## After every capture night
 
 ```bash
-# ASIAir dumps land in "<working library>/_sessions to organize/",
-# one folder per session, named:  Target_id Scope Sensor YYYY-MM-DD
+python3 intake.py                     # review the plan (see above)
+python3 intake.py --apply             # stage the new sessions
 python3 preflight.py                  # validate the staged sessions (report only)
 python3 preflight.py --apply          # file the passing ones into the library
                                       #   --force also files WARNs; FAILs never move

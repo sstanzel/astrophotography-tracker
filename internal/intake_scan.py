@@ -489,19 +489,22 @@ def group_sessions(
 def calibration_sets(records: list[dict]) -> list[dict]:
     """Summarize library-calibration records (darks/bias) into display sets.
 
+    Grouped by (source, camera, kind, exposure, gain, night) — deliberately
+    NOT by exact temperature: uncooled dark-library nights drift a degree at
+    a time and would otherwise explode into one line per frame. The set shows
+    its temperature as a min…max range instead.
+
     Args:
         records: calibration-bucket records from group_sessions() (each
             tagged with its source id).
 
     Returns:
-        One dict per (source, camera, kind, exposure, gain, temp, night),
-        with count and bytes, sorted for display.
+        One dict per set, with count/bytes/temp range, sorted for display.
     """
     sets: dict[tuple, dict] = {}
     for rec in records:
         sid = rec.get("source", "?")
-        key = (sid, rec["cam"], rec["kind"], rec["exp"], rec["unit"], rec["gain"],
-               rec["temp"], rec["night"])
+        key = (sid, rec["cam"], rec["kind"], rec["exp"], rec["unit"], rec["gain"], rec["night"])
         entry = sets.get(key)
         if entry is None:
             entry = sets[key] = {
@@ -510,11 +513,24 @@ def calibration_sets(records: list[dict]) -> list[dict]:
                 "kind": rec["kind"],
                 "exp": f"{rec['exp']}{rec['unit']}",
                 "gain": rec["gain"],
-                "temp": rec["temp"],
                 "night": rec["night"],
                 "count": 0,
                 "bytes": 0,
+                "_temps": [],
             }
         entry["count"] += 1
         entry["bytes"] += rec["size"]
-    return sorted(sets.values(), key=lambda e: (e["source"], e["night"], e["kind"], e["exp"]))
+        try:
+            entry["_temps"].append(float(rec["temp"]))
+        except (TypeError, ValueError):
+            pass
+    out = sorted(sets.values(), key=lambda e: (e["source"], e["night"], e["kind"], e["exp"]))
+    for entry in out:
+        temps = entry.pop("_temps")
+        if not temps:
+            entry["temp"] = "?"
+        elif min(temps) == max(temps):
+            entry["temp"] = f"{min(temps):g}"
+        else:
+            entry["temp"] = f"{min(temps):g}…{max(temps):g}"
+    return out

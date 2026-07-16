@@ -910,6 +910,72 @@ def render_plan(cfg: dict, args, scans: dict[str, dict], ctx: dict) -> int:
 
 
 # ==========================================================================
+# Audit — is everything still where the ledger says, byte-for-byte?
+# ==========================================================================
+def _hash_file(path: str, hash_name: str) -> str:
+    h = hashlib.new(hash_name)
+    with open(path, "rb") as fin:
+        while chunk := fin.read(COPY_CHUNK_BYTES):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def run_audit(cfg: dict, args) -> None:
+    """Verify every ledger row against reality.
+
+    Default: each copied file exists at its staged or filed location with a
+    matching size (fast — safe to run habitually). --deep additionally
+    re-hashes each file against the stored digest (rereads everything ever
+    imported; for occasional full assurance).
+    """
+    settings = cfg["settings"]
+    staging = resolve_staging(settings)
+    con = intake_ledger.open_ledger(resolve_ledger(settings))
+    lib_index = build_library_index()
+    rows = intake_ledger.all_copied_rows(con)
+
+    print(f"Intake audit{' (deep — re-hashing)' if args.deep else ''}")
+    print(f"Ledger  : {resolve_ledger(settings)} — {len(rows):,} copied file(s) to verify")
+    for label, _path, mounted in lib_index["libraries"]:
+        if not mounted:
+            print(f"warning : library {label} NOT MOUNTED — its filed sessions can't be verified")
+
+    n_ok = 0
+    failures: list[str] = []
+    missing_by_session: dict[str, int] = {}
+    for row in rows:
+        staged = os.path.join(staging, row["dest_relpath"])
+        filed = _filed_path(lib_index, row["session"], row["dest_relpath"])
+        path = staged if os.path.exists(staged) else (filed if filed and os.path.exists(filed) else None)
+        if path is None:
+            missing_by_session[row["session"]] = missing_by_session.get(row["session"], 0) + 1
+            continue
+        size = os.path.getsize(path)
+        if size != row["size"]:
+            failures.append(
+                f"size mismatch: {path} — ledger {row['size']:,} bytes, on disk {size:,}"
+            )
+            continue
+        if args.deep and _hash_file(path, settings["hash"]) != row["sha"]:
+            failures.append(f"hash mismatch: {path} — content differs from the verified copy")
+            continue
+        n_ok += 1
+
+    for session, n in sorted(missing_by_session.items()):
+        failures.append(
+            f"missing: {n} file(s) of {session!r} in neither staging nor the library"
+        )
+    print(f"\n{n_ok:,} of {len(rows):,} verified ok")
+    for line in failures:
+        print(f"  FAIL  {line}")
+    if failures:
+        print(f"\naudit FAILED — {len(failures)} problem(s) above")
+        sys.exit(1)
+    print("audit ok — every ledgered copy is present" + (" and hash-verified" if args.deep else ""))
+    sys.exit(0)
+
+
+# ==========================================================================
 # Apply
 # ==========================================================================
 def _clean_stale_parts(staging: str) -> int:
@@ -1130,6 +1196,16 @@ def main() -> None:
         action="store_true",
         help="re-offer ledgered files whose staged/filed copy has vanished",
     )
+    ap.add_argument(
+        "--audit",
+        action="store_true",
+        help="verify every ledgered copy exists with matching size (see --deep)",
+    )
+    ap.add_argument(
+        "--deep",
+        action="store_true",
+        help="with --audit: also re-hash every copy against its stored digest",
+    )
     args = ap.parse_args()
 
     cfg = load_intake_config(args.config)
@@ -1138,6 +1214,9 @@ def main() -> None:
         return
     if args.census:
         run_census(cfg, args)
+        return
+    if args.audit:
+        run_audit(cfg, args)
         return
     run_plan(cfg, args)
 
