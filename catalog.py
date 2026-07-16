@@ -1,5 +1,6 @@
 """
-file_masters.py - file WBPP-built calibration masters into their set folders.
+catalog.py - file WBPP-built calibration masters into their set folders.
+(Formerly file_masters.py.)
 
 WBPP (PixInsight) drops its output INSIDE the Bias/Dark set folder it was
 pointed at:
@@ -35,8 +36,8 @@ appends what it did to `_organization/dev/actions.log` (see astro_config.
 log_actions).
 
 Usage:
-    python3 file_masters.py            # preview
-    python3 file_masters.py --apply
+    python3 catalog.py            # preview
+    python3 catalog.py --apply
 """
 
 import argparse
@@ -264,7 +265,7 @@ def main() -> int:
             all_warnings += warnings
 
     mode = "APPLY" if args.apply else "PREVIEW (use --apply to perform)"
-    print(f"file_masters - {mode}\n")
+    print(f"catalog - {mode}\n")
     if not all_actions and not all_warnings:
         print("Nothing to do: no WBPP output found in any Bias/Dark set.")
         return 0
@@ -273,7 +274,7 @@ def main() -> int:
         print(describe(a))
         if args.apply:
             log_lines.append(perform(a))
-    astro_config.log_actions("file_masters", log_lines)
+    astro_config.log_actions("catalog", log_lines)
     for w in all_warnings:
         print(f"  WARN    {w}")
     moved = sum(1 for a in all_actions if a["kind"] in ("move", "rename"))

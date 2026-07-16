@@ -3,15 +3,15 @@
 Every anomaly the tracker looks for, in one reviewable list. Two surfaces run
 them:
 
-- **Every ingest — `validate()`** (in `ingest.py`, re-runnable via
-  `validate.py`): *structural* checks — naming, dates, registry membership,
+- **Every scan — `validate()`** (in `internal/scan.py`, re-runnable via
+  `internal/validate.py`): *structural* checks — naming, dates, registry membership,
   manifests. Findings land in `validation_findings` and render as the
   dashboard's **Data Health** panel (CAL_* findings render in the coverage
   panel footer instead).
-- **Occasional — `scrub.py`**: *consistency* checks — the anomalies that hide
+- **Occasional — `audit.py`**: *consistency* checks — the anomalies that hide
   inside well-formed sessions (mixed capture settings, double-counted frames,
   cooler failures, cross-library duplicates). Read-only report for the initial
-  ingest of a new library or a periodic "spring cleaning"; nothing is written
+  scan of a new library or a periodic "spring cleaning"; nothing is written
   to the DB.
 
 Severities follow the house rule: **error** = wrong data or double-counting —
@@ -19,7 +19,7 @@ act now; **warning** = probably needs a decision; **info** = worth a look, may
 be intentional. This file is the source list for the paper's future
 data-quality section (see BACKLOG.md).
 
-## Every-ingest validation (`validate()` → Data Health panel)
+## Every-scan validation (`validate()` → Data Health panel)
 
 ### Tier 1 — session structure
 
@@ -52,20 +52,20 @@ data-quality section (see BACKLOG.md).
 | `INTEGRATION_EMPTY` | error | No resolvable member sessions | Fix the membership rule |
 | `REGISTRY_MISSING` | warning | Target folder with no registry entry | Add the registry directory |
 | `CAL_UNKNOWN_CAMERA` | warning | Bias/Dark camera folder not in sensor_values | Rename the folder to the registry name |
-| `INTEGRATION_NO_MANIFEST` | warning | integrations/ folder without integration.toml | Scaffold with new_integration.py |
+| `INTEGRATION_NO_MANIFEST` | warning | integrations/ folder without integration.toml | Scaffold with `integration.py new` |
 | `INTEGRATION_KIND_MISMATCH` | warning | Declared kind ≠ what the members imply | Fix the manifest |
 | `INTEGRATION_SINGLE_MEMBER` | warning | Multi-session integration with one member | Confirm intent, or add the members |
 | `REGISTRY_ORPHAN` | info | Registry entry with no library folder | Fine for planned targets |
 | `CAL_EMPTY` | info | Calibration folder with no frames | Delete the shell |
 
-## Occasional scrub (`scrub.py`)
+## Occasional audit (`audit.py`)
 
 ### Errors — wrong totals or corrupt data
 
 | Code | What it looks for | Typical remedy |
 |---|---|---|
 | `DUPLICATE_FRAME` | Same light (capture timestamp + counter) counted twice in a session | Delete the extra copy — hours are inflated |
-| `SCRATCH_FRAME` | Frames ingested from `PI Process/` / `PI Magic/` scratch | `clean_processing.py`, then re-ingest |
+| `SCRATCH_FRAME` | Frames counted from `PI Process/` / `PI Magic/` scratch | `sweep.py`, then re-run `refresh.py` |
 | `MIXED_CAMERA` | Two camera tokens among one session's lights | Move the foreign frames to their own session |
 | `CROSS_LIBRARY_DUPLICATE` | Same session folder on more than one library (the DB's unique key hides this) | Keep one copy; archive or delete the other |
 | `ZERO_BYTE_FRAME` | 0-byte frame file | Delete; re-transfer if the original exists |

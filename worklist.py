@@ -197,7 +197,7 @@ def main():
     ap.add_argument("--db", default=os.path.join(here, "tracker.db"))
     args = ap.parse_args()
     if not os.path.exists(args.db):
-        sys.exit(f"Database not found: {args.db}\nRun ingest.py first.")
+        sys.exit(f"Database not found: {args.db}\nRun refresh.py first.")
 
     con = sqlite3.connect(args.db)
     cur = con.cursor()

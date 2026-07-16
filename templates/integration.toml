@@ -2,13 +2,13 @@
 # Integration manifest  ·  TOML format
 # =============================================================================
 # Marks a folder as a MULTI-SESSION or COMPOSITE integration. Scaffold one with
-#   python3 new_integration.py --target "M 81 Bodes Galaxy" \
+#   python3 integration.py new --target "M 81 Bodes Galaxy" \
 #       --rig "RASA8 ASI2600MCAir" --span all --goal 50 --apply
 # which creates the folder and a filled-in copy of this file.
 #
 #   {Target}/integrations/{integration name}/
 #       {name}.pxiproject          ← the PixInsight project
-#       PI Process/   PI Magic/    ← scratch (clean_processing.py clears these)
+#       PI Process/   PI Magic/    ← scratch (sweep.py clears these)
 #       {name} Results/            ← kept stacked master + finished images
 #       integration.toml           ← THIS FILE
 #
@@ -22,7 +22,7 @@
 # folders ("… v1") are only for deliberately frozen, published snapshots.
 #
 # Light and calibration frames are never copied here — the .pxiproject just
-# references them in the session folders. ingest.py reads this manifest.
+# references them in the session folders. internal/scan.py reads this manifest.
 # =============================================================================
 
 [membership]
@@ -39,7 +39,7 @@ goal_hours = 50               # optional integration-hours goal (drives the prog
 [built]
 # What you actually stacked into the CURRENT master — your truthful record and
 # the source of "built hours". Fill it after each stack with:
-#   python3 mark_integrated.py "<this integration folder>" --apply
+#   python3 integration.py mark "<this integration folder>" --apply
 # It snapshots the sessions matching the rule. The gap between built and
 # available is the "stale" signal (captured, not yet stacked). data_through
 # (newest built night) and the stacking method (PixInsight vs PI Magic) are

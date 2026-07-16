@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ingest.py — populate the astrophotography tracker SQLite database.
+scan.py — populate the astrophotography tracker SQLite database.
+(Formerly ingest.py.)
 
 Walks every configured capture library, parses every session folder and
 FITS filename, walks the shared calibration library, and upserts everything into
@@ -11,7 +12,7 @@ stays stable; a session's frames are deleted and re-inserted on each run so the
 counts always reflect what's on disk right now.
 
 Usage:
-    python3 ingest.py [--db PATH] [--schema PATH] [--xlsx PATH] [--quiet]
+    python3 internal/scan.py [--db PATH] [--schema PATH] [--xlsx PATH] [--quiet]
 
 Defaults assume the script lives in  _organization/tracker/  and
 writes the database next to it. Run with no arguments after a capture night to

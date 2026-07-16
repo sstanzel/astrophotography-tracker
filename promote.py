@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-promote_masters.py - copy keeper files into their Results folders.
+promote.py - copy keeper files into their Results folders.
+(Formerly promote_masters.py.)
 
 Keepers are the integrated **master** (the stacked light) and any Photoshop
 **.psd** edit — both belong in Results, but PixInsight / PI Magic Studio leave
-them inside the working folders (PI Process / PI Magic) that clean_processing.py
+them inside the working folders (PI Process / PI Magic) that sweep.py
 is free to delete. This script walks the libraries, finds the keepers in each
 session's or integration's working folders, and copies them to the sibling
 "{name} Results" folder if not already there — so they are safe before the
@@ -12,15 +13,15 @@ working folders are swept.
 
 Model: raw data lives in Light/ + calibration; keepers (master + flat exports)
 live in Results/; PI Process / PI Magic are recreatable scratch. This script is
-the "make sure the master reached Results" step; clean_processing.py enforces it
+the "make sure the master reached Results" step; sweep.py enforces it
 before deleting.
 
 Copies (never moves) and never overwrites an existing Results file. Dry run by
 default; pass --apply to actually copy.
 
-    python3 promote_masters.py                 # preview every pending copy
-    python3 promote_masters.py --apply
-    python3 promote_masters.py --only "M_51"    # limit to matching folders
+    python3 promote.py                 # preview every pending copy
+    python3 promote.py --apply
+    python3 promote.py --only "M_51"    # limit to matching folders
 """
 
 from __future__ import annotations
@@ -193,7 +194,7 @@ def main() -> None:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
         log_lines.append(f"copy '{src}' → '{dst}'")
-    astro_config.log_actions("promote_masters", log_lines)
+    astro_config.log_actions("promote", log_lines)
     print(f"Copied {copied} keeper(s) into their Results folders.")
 
 

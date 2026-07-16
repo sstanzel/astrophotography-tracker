@@ -13,7 +13,7 @@ volume named in `config.toml` mounted.
 
 **Layout:** the tracker root holds only the commands you run (plus `config.toml` and
 the generated outputs). `internal/` is the machinery — modules the commands import and
-the scripts `refresh.py` chains (ingest, the two exports, populate_notes, validate);
+the scripts `refresh.py` chains (scan, the two exports, populate_notes, validate);
 you never run those by hand in normal use. `docs/` is reference reading: STYLE.md,
 BACKLOG.md, CHECKS.md, queries.sql, and the paper PDF.
 
@@ -68,7 +68,7 @@ python3 refresh.py --notes            # rescan -> DB -> dashboard + xlsx -> mirr
                                       #   --notes back-fills moon/weather in notes.toml
 ```
 
-`refresh.py --no-ingest` re-renders without rescanning (e.g. after editing a
+`refresh.py --no-scan` re-renders without rescanning (e.g. after editing a
 manifest); `--no-mirror` skips copying the outputs to the `[mirror]` folder.
 
 ## What should I work on?
@@ -108,17 +108,17 @@ every existing session's notes.toml was backfilled 2026-07-11.
 
 ```bash
 # Once per target+rig: scaffold a living multi-session integration
-python3 new_integration.py --target "M 81 Bodes Galaxy" \
+python3 integration.py new --target "M 81 Bodes Galaxy" \
     --rig "RASA8 ASI2600MCAir" --span all --goal 50 --apply
 #   --span '2026' | '2024-2026' | 'all'; omit --rig for a composite across rigs
 #   --built: retroactive scaffold — the master already exists and contains exactly
-#            today's matches; records them in [built] so mark_integrated.py isn't
+#            today's matches; records them in [built] so the mark step isn't
 #            needed. Never pass it before stacking.
 
 # ...stack in WBPP / PI Magic Studio...
 
 # After each stack: record what actually went into the master
-python3 mark_integrated.py "<integration folder>" --apply     # --clear to reset
+python3 integration.py mark "<integration folder>" --apply     # --clear to reset
 
 python3 refresh.py                    # dashboard now shows built/available/stale
 ```
@@ -132,12 +132,12 @@ from which working folder was used.
 `worklist.py masters` lists the library sets with raws but no master. Point
 WBPP at a set folder and stack it — WBPP drops its output *inside* the set as
 `master/master….xisf` + a `logs/` folder, which is not where masters live
-(the convention is master-next-to-raws; ingest would see those subfolders as
+(the convention is master-next-to-raws; the scan would see those subfolders as
 phantom sets). After any WBPP run(s):
 
 ```bash
-python3 file_masters.py               # preview what would be filed
-python3 file_masters.py --apply       # file + rename the masters, sweep WBPP scratch
+python3 catalog.py               # preview what would be filed
+python3 catalog.py --apply       # file + rename the masters, sweep WBPP scratch
 python3 refresh.py                    # tracker picks up the new masters
 ```
 
@@ -152,22 +152,22 @@ their newest frame):
 then deletes the emptied `master/` and the `logs/` folders (WBPP scratch —
 recreatable by re-running the stack). Safe to re-run any time; it also
 renames a WBPP-named master sitting loose in a set folder. Batch-friendly:
-stack as many sets as you like, then one `file_masters.py --apply` files
+stack as many sets as you like, then one `catalog.py --apply` files
 them all.
 
 ## Reclaiming space (safe by construction)
 
 ```bash
-python3 promote_masters.py --apply    # copy keepers (master + .psd) into Results/
-python3 clean_processing.py --apply   # then empty PI Process/ + PI Magic/ scratch
-#   clean refuses any folder whose keeper isn't in Results yet;
+python3 promote.py --apply           # copy keepers (master + .psd) into Results/
+python3 sweep.py --apply             # then empty PI Process/ + PI Magic/ scratch
+#   sweep refuses any folder whose keeper isn't in Results yet;
 #   or use --promote to copy-then-clean in one pass
 ```
 
 ## The action log (what did an --apply actually do?)
 
-Every mutating script — `file_masters.py`, `promote_masters.py`,
-`clean_processing.py`, `preflight.py`, `fix_rotfirst_names.py` — appends what its `--apply` run did
+Every mutating script — `intake.py`, `preflight.py`, `catalog.py`,
+`promote.py`, `sweep.py`, `fix_rotfirst_names.py` — appends what its `--apply` run did
 (one line per move / rename / copy / delete, with full paths) to
 
     _organization/dev/actions.log
@@ -188,7 +188,7 @@ empty file named like the destination (the 2026-07-12 incident).
 
 Flats are per-session — always in a session folder, never in a library. The
 Sessions table (dashboard + xlsx) has a **Flats** column, recomputed every
-ingest: `here` (flat frames in the session folder — the convention), `with M_44`
+scan: `here` (flat frames in the session folder — the convention), `with M_44`
 (a shared-flat night; the sibling session named in the cell holds the set — the
 xlsx "Flats Location" column has the full folder name), `nearest M_44 (5d prior)`
 (no flats shot for this session; the closest same-rig set strictly *before* the
@@ -221,7 +221,7 @@ renames of the detection logic.
 Both resolved matches are also stamped into each session's `notes.toml` as
 `[calibration] flats_match` / `bias_match` by `populate_notes.py` (usually via
 `refresh.py --notes`). Those two keys are tracker-owned: refreshed on every run
-from the last ingest's DB, and inserted when a file predates them. The
+from the last scan's DB, and inserted when a file predates them. The
 `flats`/`bias` pointers are yours; the `*_match` lines are the tracker's answer
 — don't hand-edit them.
 
@@ -229,21 +229,21 @@ from the last ingest's DB, and inserted when a file predates them. The
 `_Flat older/` flat library into the session folders and stamped the pointers;
 the script was retired afterwards and lives in git history.)
 
-## Spring cleaning (the deep Data Health scrub)
+## Spring cleaning (the deep Data Health audit)
 
 ```bash
-python3 scrub.py                      # summary + every finding
-python3 scrub.py --summary            # check-by-check counts only
-python3 scrub.py --no-fs              # skip the cross-library disk pass
+python3 audit.py                      # summary + every finding
+python3 audit.py --summary            # check-by-check counts only
+python3 audit.py --no-fs              # skip the cross-library disk pass
 ```
 
-`ingest.py`'s built-in validation runs every refresh and checks *structure*
-(naming, dates, registry, manifests). `scrub.py` is the occasional physical:
+`internal/scan.py`'s built-in validation runs every refresh and checks *structure*
+(naming, dates, registry, manifests). `audit.py` is the occasional physical:
 *consistency* anomalies inside well-formed sessions — mixed gain/exposure/
 binning, double-counted or scratch-folder frames, cooler runaway, total-loss
 nights, nested calibration sets, sessions duplicated across libraries.
 Read-only (never writes the DB or touches the libraries); run after a big
-filing pass, on the initial ingest of a new library, or a couple of times a
+filing pass, on the initial scan of a new library, or a couple of times a
 season. Every check — both surfaces — is cataloged with severities and
 remedies in **docs/CHECKS.md**. Exit code 1 when any error-severity finding exists.
 
@@ -272,16 +272,15 @@ Commands at the tracker root — the ones you run:
 
 | Script | What it does | Key flags |
 |---|---|---|
-| `refresh.py` | The one command: ingest → dashboard + xlsx → mirror | `--no-ingest`, `--no-mirror`, `--notes` |
+| `refresh.py` | The one command: scan → dashboard + xlsx → mirror | `--no-scan`, `--no-mirror`, `--notes` |
 | `intake.py` | Plan-first importer: device dumps → staged session folders (the step before preflight) | `--apply`, `--show-config`, `--reimport` |
 | `preflight.py` | Validate staged sessions; file the passing ones | `--apply`, `--force`, `--staging`, `--library` |
 | `worklist.py` | Print the Work Queue | `summary` (default) \| `capture coverage masters cull integrate restack edit all` |
-| `new_integration.py` | Scaffold a living multi-session integration | `--target`, `--rig`, `--span`, `--goal`, `--built`, `--apply` |
-| `mark_integrated.py` | Record sessions stacked into a master | `<dir>`, `--apply`, `--clear` |
-| `file_masters.py` | File WBPP-built Bias/Dark masters next to their raws (rename to convention, sweep `master/`+`logs/`) | `--apply` |
-| `promote_masters.py` | Copy keepers into `Results/` | `--apply`, `--only` |
-| `clean_processing.py` | Empty PI scratch folders (keeper-safe) | `--apply`, `--only`, `--promote` |
-| `scrub.py` | Deep Data Health scrub (consistency anomalies; see docs/CHECKS.md) | `--summary`, `--no-fs`, `--db` |
+| `integration.py` | Living multi-session integrations: `new` scaffolds, `mark` records what you stacked | `new --target/--rig/--span/--goal/--built/--apply` · `mark <dir> --apply/--clear` |
+| `catalog.py` | File WBPP-built Bias/Dark masters next to their raws (rename to convention, sweep `master/`+`logs/`) | `--apply` |
+| `promote.py` | Copy keepers into `Results/` | `--apply`, `--only` |
+| `sweep.py` | Empty PI scratch folders (keeper-safe) | `--apply`, `--only`, `--promote` |
+| `audit.py` | Deep Data Health audit (consistency anomalies; see docs/CHECKS.md) | `--summary`, `--no-fs`, `--db` |
 | `bootstrap.py` | Fresh start: stamp out the `_organization/` skeleton | `--dry-run` |
 | `fix_rotfirst_names.py` | One-time: rename rot-first frames (Dec 2025 – Mar 2026 epoch) to the timestamp-first grammar so Blink sorts chronologically; retire after running | `--apply`, `--verbose` |
 
@@ -289,11 +288,11 @@ Machinery in `internal/` — chained by refresh or imported; run directly only w
 
 | Script | What it does | Key flags |
 |---|---|---|
-| `internal/ingest.py` | Scan → parse → SQLite only (no exports/mirror) | `--config`, `--no-validate`, `--quiet` |
+| `internal/scan.py` | Scan → parse → SQLite only (no exports/mirror) | `--config`, `--no-validate`, `--quiet` |
 | `internal/export_html.py` / `internal/export_xlsx.py` | Regenerate one output from the DB | `--db`, `--out` |
 | `internal/populate_notes.py` | Back-fill moon/weather + stamp flats/bias matches into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only`, `--db` |
 | `internal/validate.py` | Re-run the validation pass against the existing DB | `--db` |
 
-The mutating scripts (`preflight`, `file_masters`, `promote_masters`,
-`clean_processing`, `fix_rotfirst_names`) log every `--apply` action to
+The mutating scripts (`intake`, `preflight`, `catalog`, `promote`,
+`sweep`, `fix_rotfirst_names`) log every `--apply` action to
 `_organization/dev/actions.log` (see "The action log" above).

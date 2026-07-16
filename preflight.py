@@ -9,7 +9,7 @@ folder from the registry when the library doesn't have it yet. The registry's
 carry no empty target folders; a folder appears in a library the first time a
 session for it is filed.
 
-Reuses the exact grammars ingest.py applies (SESSION_RE, parse_target_folder,
+Reuses the exact grammars scan.py applies (SESSION_RE, parse_target_folder,
 fits_parser.parse), so a clean pre-flight means ingest will parse the session
 the same way after the move.
 
@@ -39,7 +39,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "internal"))
 import astro_config  # noqa: E402
-from ingest import SESSION_RE, parse_target_folder, walk_fits  # noqa: E402
+from scan import SESSION_RE, parse_target_folder, walk_fits  # noqa: E402
 from fits_parser import frame_kind, safe, exposure_seconds, is_non_science  # noqa: E402
 
 # Session date is the local civil evening; UTC frame stamps can roll past
@@ -64,7 +64,7 @@ def registry_names(subfolder: str) -> set[str]:
 
     Returns:
         Set of directory names (the names ARE the data), excluding the
-        "."/"!"-prefixed entries ingest.py also excludes.
+        "."/"!"-prefixed entries scan.py also excludes.
     """
     path = astro_config.org_path(subfolder)
     if not os.path.isdir(path):
@@ -84,7 +84,7 @@ def library_target_map(library_root: str) -> dict[str, str]:
 
     Returns:
         Dict like {"M_81": "M 81 Bodes Galaxy", ...} using the same
-        parse_target_folder() ingest.py uses.
+        parse_target_folder() scan.py uses.
     """
     out: dict[str, str] = {}
     for name in sorted(os.listdir(library_root)):
