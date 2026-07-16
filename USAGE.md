@@ -167,7 +167,7 @@ python3 sweep.py --apply             # then empty PI Process/ + PI Magic/ scratc
 ## The action log (what did an --apply actually do?)
 
 Every mutating script — `intake.py`, `preflight.py`, `catalog.py`,
-`promote.py`, `sweep.py` — appends what its `--apply` run did
+`promote.py`, `sweep.py`, `fix_rotfirst_names.py` — appends what its `--apply` run did
 (one line per move / rename / copy / delete, with full paths) to
 
     _organization/dev/actions.log
@@ -282,6 +282,7 @@ Commands at the tracker root — the ones you run:
 | `sweep.py` | Empty PI scratch folders (keeper-safe) | `--apply`, `--only`, `--promote` |
 | `audit.py` | Deep Data Health audit (consistency anomalies; see docs/CHECKS.md) | `--summary`, `--no-fs`, `--db` |
 | `bootstrap.py` | Fresh start: stamp out the `_organization/` skeleton | `--dry-run` |
+| `fix_rotfirst_names.py` | One-time: rename rot-first frames (Dec 2025 – Mar 2026 epoch) to the timestamp-first grammar so Blink sorts chronologically; retire after running | `--apply`, `--verbose` |
 
 Machinery in `internal/` — chained by refresh or imported; run directly only when debugging:
 
@@ -292,6 +293,6 @@ Machinery in `internal/` — chained by refresh or imported; run directly only w
 | `internal/populate_notes.py` | Back-fill moon/weather + stamp flats/bias matches into notes.toml (usually via `refresh --notes`) | `--dry-run`, `--no-weather`, `--only`, `--db` |
 | `internal/validate.py` | Re-run the validation pass against the existing DB | `--db` |
 
-The five mutating scripts (`intake`, `preflight`, `catalog`, `promote`,
-`sweep`) log every `--apply` action to `_organization/dev/actions.log`
-(see "The action log" above).
+The mutating scripts (`intake`, `preflight`, `catalog`, `promote`,
+`sweep`, `fix_rotfirst_names`) log every `--apply` action to
+`_organization/dev/actions.log` (see "The action log" above).
