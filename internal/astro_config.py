@@ -41,15 +41,15 @@ def org_path(*parts):
 def log_actions(script: str, lines: list[str]) -> None:
     """Append an --apply run's actions to the shared action log.
 
-    Every mutating script (file_masters, promote_masters, clean_processing,
-    preflight) records what it actually did - one line per move/rename/copy/
+    Every mutating script (preflight, intake,
+    catalog, promote, sweep) records what it actually did - one line per move/rename/copy/
     delete - to `_organization/dev/actions.log`, so "what touched my files?"
     is answerable after the terminal scrollback is gone. Append-only plain
     text; actions are rare, so the file grows by a few hundred bytes per run
     and is safe to delete at any time.
 
     Args:
-        script: the calling script's name, e.g. 'file_masters'.
+        script: the calling script's name, e.g. 'catalog'.
         lines: one already-formatted line per performed action. When empty
             (a preview, or an --apply that found nothing to do) nothing is
             written.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-clean_processing.py - empty the PI Process and PI Magic working folders.
+sweep.py - empty the PI Process and PI Magic working folders.
+(Formerly clean_processing.py.)
 
 Those two folders hold PixInsight intermediate/scratch files. The keeper output
 (stacked / integrated images) belongs in each session's "{session} Results"
@@ -11,14 +12,14 @@ folders in place, since they are part of the PostHaste session template.
 SAFE BY DEFAULT: a plain run only previews. Nothing is deleted until you pass
 --apply. And as a safety net, any container whose keeper (the integrated master
 or a .psd edit) is not yet in its "{name} Results" folder is SKIPPED and
-reported — run promote_masters.py first, or pass --promote to copy the keepers
+reported — run promote.py first, or pass --promote to copy the keepers
 to Results before cleaning.
 
 Run natively on the Mac:
-    python3 "clean_processing.py"                # preview (dry run)
-    python3 "clean_processing.py" --apply         # empty the folders
-    python3 "clean_processing.py" --promote --apply   # copy master→Results, then empty
-    python3 "clean_processing.py" --only "M_81"   # limit to matching folders
+    python3 "sweep.py"                # preview (dry run)
+    python3 "sweep.py" --apply         # empty the folders
+    python3 "sweep.py" --promote --apply   # copy master→Results, then empty
+    python3 "sweep.py" --only "M_81"   # limit to matching folders
 """
 
 from __future__ import annotations
@@ -28,12 +29,12 @@ import argparse, os, shutil, sys
 # Configuration
 # =============================================================================
 # Library paths come from config.toml (via astro_config) — not hardcoded.
-# promote_masters is a top-level sibling; astro_config lives in internal/.
+# promote is a top-level sibling; astro_config lives in internal/.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.join(_HERE, "internal"))
 import astro_config  # noqa: E402
-from promote_masters import find_keepers, results_dir_for  # noqa: E402
+from promote import find_keepers, results_dir_for  # noqa: E402
 
 WORKING_FOLDERS = ("PI Process", "PI Magic")  # folders whose contents get cleared
 SKIP_TOPLEVEL = {"_organization", "_Calibration Library", "_sessions to organize"}
@@ -212,7 +213,7 @@ def main():
     total_files = sum(t[1] for t in targets)
     total_bytes = sum(t[2] for t in targets)
     mode = "APPLY" if args.apply else "DRY RUN"
-    print(f"clean_processing.py — {mode}")
+    print(f"sweep.py — {mode}")
     print(
         f"Working folders to empty: {len(targets)}  "
         f"({total_files} files, {human(total_bytes)})\n"
@@ -233,7 +234,7 @@ def main():
     if skipped:
         print(
             f"\n  SKIPPED — a keeper (master or .psd) is not in Results yet "
-            f"(run promote_masters.py, or re-run with --promote):"
+            f"(run promote.py, or re-run with --promote):"
         )
         for wpath, keeper in skipped:
             print(f"    {wpath}")
@@ -259,7 +260,7 @@ def main():
             log_lines.append(f"empty '{wpath}' ({fc} files)")
         except OSError as e:
             print(f"  ! could not empty {wpath}: {e}")
-    astro_config.log_actions("clean_processing", log_lines)
+    astro_config.log_actions("sweep", log_lines)
     print(
         f"Done — emptied {removed_folders} folder(s), "
         f"removed {removed_files} files, reclaimed {human(total_bytes)}."

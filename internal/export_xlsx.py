@@ -2,7 +2,7 @@
 """
 export_xlsx.py — generate the Excel tracker workbook from tracker.db.
 
-Reads the SQLite database produced by ingest.py and writes a clean multi-tab
+Reads the SQLite database produced by scan.py and writes a clean multi-tab
 workbook: Summary, Sessions, Targets, Calibration, QC Candidates, Integrations,
 Data Health — the same data the HTML dashboard shows.
 
@@ -13,7 +13,7 @@ the rollups stay live if a cell is edited by hand.
 Usage:
     python3 export_xlsx.py [--db PATH] [--out PATH]
 
-Run after ingest.py to refresh the workbook.
+Re-run refresh.py to update the workbook.
 """
 
 import os, sys, sqlite3, argparse, datetime
@@ -80,7 +80,7 @@ def main():
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
-        sys.exit(f"Database not found: {args.db}\nRun ingest.py first.")
+        sys.exit(f"Database not found: {args.db}\nRun refresh.py first.")
 
     con = sqlite3.connect(args.db)
     con.row_factory = sqlite3.Row
