@@ -84,9 +84,10 @@ python3 intake.py --show-config       # parsed sources, rig table, resolved path
 ```
 
 When equipment changes (camera moves to another scope, a rig's `adjacent`
-role ends): **close out, don't edit** — add `to = <last night in the old
-configuration>` to the existing [[rig]] entry, then add a new open-ended
-entry for the new reality. Historical nights keep resolving correctly
+role ends): **close out, don't edit** — add `to = <last CIVIL night in the
+old configuration>` (the session-date convention: pre-noon frames belong to
+the previous evening's date) to the existing [[rig]] entry, then add a new
+open-ended entry for the new reality. Historical nights keep resolving correctly
 forever. The plan names the rule behind every session (`open-ended rule` /
 `dated rule … → date`), so review catches a wrong bound before any copy.
 

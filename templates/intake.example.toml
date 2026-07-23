@@ -50,8 +50,11 @@ layout = "nina"
 # scope/sensor must be registry names (scope_values/, sensor_values/).
 #
 # Equipment swaps — the workflow is CLOSE OUT, don't edit:
-#   1. Add `to = <last night in the old configuration>` to the entry that
-#      described the old reality (it becomes the dated history entry).
+#   1. Add `to = <last CIVIL night in the old configuration>` to the entry
+#      that described the old reality (it becomes the dated history entry).
+#      Civil night = the session-date convention: frames before local noon
+#      belong to the previous evening's date, so a swap done during the day
+#      closes out with the previous evening's date.
 #   2. Add a new open-ended block for the new reality.
 # Historical nights keep resolving correctly forever; swaps are additive
 # config, never code. The same recipe covers an `adjacent` role change.
