@@ -112,7 +112,7 @@ def make_env(tmp_path, monkeypatch, n_lights=3):
     }
     monkeypatch.setattr(
         intake, "build_library_index",
-        lambda: {"names": {}, "by_target_night": {}, "libraries": []},
+        lambda: {"names": {}, "by_folder_night": {}, "libraries": []},
     )
     monkeypatch.setattr(
         intake, "load_registry_vocab",
@@ -246,6 +246,55 @@ def test_stale_parts_cleaned_at_apply(tmp_path, monkeypatch):
     intake.run_apply(cfg, make_args(), scans, ctx)
 
     assert not stale.exists()
+
+
+def test_twin_guard_same_folder_night_different_name(tmp_path, monkeypatch):
+    # The NGC 3718/3729 case: the night is in the library under the companion
+    # galaxy's name — same destination folder + night, different session name.
+    cfg = make_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        intake, "build_library_index",
+        lambda: {
+            "names": {},
+            "by_folder_night": {
+                ("M 5 globular cluster", "2026-07-08"): [
+                    ("M_5_companion RASA8 ASI2600MCAir 2026-07-08", False)
+                ]
+            },
+            "libraries": [],
+        },
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    assert any(
+        "already in the library as M_5_companion" in line and "duplicate" in line
+        for line in ctx["attention"]
+    )
+
+
+def test_twin_guard_exempts_adjacent_pairing(tmp_path, monkeypatch):
+    # Two rigs legitimately share a folder+night when one is the adjacent-
+    # field rig — an _adjacent library session must not flag the main one.
+    cfg = make_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        intake, "build_library_index",
+        lambda: {
+            "names": {},
+            "by_folder_night": {
+                ("M 5 globular cluster", "2026-07-08"): [
+                    ("M_5_adjacent Redcat51 minicam8 2026-07-08", True)
+                ]
+            },
+            "libraries": [],
+        },
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    assert not any("duplicate" in line for line in ctx["attention"])
 
 
 def test_ignore_block_excludes_session(tmp_path, monkeypatch):

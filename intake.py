@@ -400,20 +400,24 @@ def build_library_index() -> dict:
     """Index every session folder in every mounted configured library.
 
     A projected session that already exists anywhere is `already in library`
-    (never copied); a same-target same-night session under a DIFFERENT name
-    (rig renamed, hand-named differently) is surfaced for review instead of
-    silently duplicated.
+    (never copied); a session for the SAME destination folder + night under a
+    different name (companion-galaxy naming like NGC_3729 inside the NGC 3718
+    folder, a wrong rig token, a spelling variant) is surfaced for review
+    instead of silently duplicated. The twin index keys on the session's
+    PARENT FOLDER — the folder is the physical identity per the registry —
+    with `_adjacent` sessions tracked apart (two rigs legitimately share a
+    folder+night when one is the adjacent-field rig).
 
     Returns:
         {'names': {session name → absolute path},
-         'by_target_night': {(base target_id, date) → [session names]},
+         'by_folder_night': {(target folder, date) → [(session name, is_adjacent)]},
          'libraries': [(label, path, mounted)]}
     """
     from scan import SESSION_RE, parse_target_folder  # noqa: F401
     from preflight import ADJACENT_SUFFIX
 
     names: dict[str, str] = {}
-    by_tn: dict[tuple, list[str]] = {}
+    by_fn: dict[tuple, list[tuple[str, bool]]] = {}
     libraries: list[tuple[str, str, bool]] = []
     for lib in astro_config.load_libraries():
         mounted = os.path.isdir(lib["path"])
@@ -429,12 +433,9 @@ def build_library_index() -> dict:
                 if not m or not os.path.isdir(os.path.join(tfpath, entry)):
                     continue
                 names[entry] = os.path.join(tfpath, entry)
-                base = m.group("target")
-                if base.lower().endswith(ADJACENT_SUFFIX):
-                    base = base[: -len(ADJACENT_SUFFIX)]
-                key = (base, m.group("date"))
-                by_tn.setdefault(key, []).append(entry)
-    return {"names": names, "by_target_night": by_tn, "libraries": libraries}
+                is_adjacent = m.group("target").lower().endswith(ADJACENT_SUFFIX)
+                by_fn.setdefault((tf, m.group("date")), []).append((entry, is_adjacent))
+    return {"names": names, "by_folder_night": by_fn, "libraries": libraries}
 
 
 # Recreatable working folders inside a session — copies of frames in there
@@ -697,17 +698,29 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
                     }
                 )
 
-        base = sess["name"].split(" ")[0]
-        base = base[: -len("_adjacent")] if base.lower().endswith("_adjacent") else base
+        # Twin guard: another session for the same DESTINATION FOLDER + night
+        # (matching adjacentness) means this night is already in the library
+        # under a different name — the exact-name dedupe can't see it, and
+        # preflight would file it without a collision. Runs for every new
+        # session, staged or not: a staged twin is one preflight --apply away
+        # from a duplicated night.
+        token = sess["name"].split(" ")[0].lower()
+        planned_adjacent = token.endswith("_adjacent")
+        base = token[: -len("_adjacent")] if planned_adjacent else token
+        dest_folder = next(
+            (f for t, f in vocab["targets"].items() if t.lower() == base), None
+        )
         twins = [
-            n
-            for n in lib_index["by_target_night"].get((base, sess["night"].isoformat()), [])
-            if n != sess["name"]
+            name
+            for name, is_adjacent in lib_index["by_folder_night"].get(
+                (dest_folder, sess["night"].isoformat()), []
+            )
+            if name != sess["name"] and is_adjacent == planned_adjacent
         ]
-        if twins and any(f["decision"] == "copy" for f in sess["files"]):
+        if twins:
             attention.append(
-                f"{sess['name']}: same target+night already in the library under a different "
-                f"name: {', '.join(twins)} — copying would duplicate that night"
+                f"{sess['name']}: this folder + night is already in the library as "
+                f"{', '.join(twins)} — staging/filing this would duplicate that night"
             )
 
     # Reconciliation: every ledger row's copy must still exist somewhere.
