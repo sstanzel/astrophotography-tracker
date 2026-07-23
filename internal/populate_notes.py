@@ -538,6 +538,138 @@ def stamp_calibration(text, values):
 
 
 # =============================================================================
+# Capture record  (tracker.db -> [capture] — the reject/kept counts that
+# survive a later deletion of the raw frames)
+# =============================================================================
+# The tracker is file-derived: delete rejected raws to reclaim space and the
+# next scan forgets they existed. This tracker-owned section preserves the
+# capture-night truth in the one artifact that survives cleanup, the session's
+# notes.toml. lights_captured is a HIGH-WATER mark (kept+rejected, never
+# decreased); kept/rejected/hours track current disk truth; a session with no
+# lights on disk is never re-stamped, so the last true values stay frozen.
+CAPTURE_KEYS = ("lights_captured", "lights_kept", "lights_rejected", "kept_exposure_hours")
+
+_CAPTURE_KEY_RE = re.compile(
+    r'(\s*)(' + "|".join(CAPTURE_KEYS) + r')(\s*=\s*)([-\d.]+)(.*?)(\r?\n?)$'
+)
+
+
+def load_capture_stats(db_path):
+    """Read every session's light counts + kept exposure from tracker.db.
+
+    Args:
+        db_path: path to tracker.db (written by scan.py).
+
+    Returns:
+        Dict of session folder name -> {"lights_kept": int,
+        "lights_rejected": int, "kept_exposure_hours": float}. Empty when the
+        DB is missing (fresh clone, scan never run).
+    """
+    if not os.path.isfile(db_path):
+        return {}
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT folder_path, lights_kept, lights_rejected, integration_s FROM sessions"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        con.close()
+    return {
+        os.path.basename(fp): {
+            "lights_kept": kept or 0,
+            "lights_rejected": rej or 0,
+            "kept_exposure_hours": round((integ or 0.0) / 3600.0, 2),
+        }
+        for fp, kept, rej, integ in rows
+    }
+
+
+def stamp_capture(text, stats):
+    """Write the [capture] record, creating the section or keys as needed.
+
+    Tracker-owned like stamp_calibration: values are overwritten when disk
+    truth changes — EXCEPT lights_captured, which only ever rises, and the
+    whole stamp is skipped when the session currently has zero lights on disk
+    (that is the record surviving a cleanup, not a session with no data).
+
+    Args:
+        text: current notes.toml content.
+        stats: {"lights_kept": int, "lights_rejected": int,
+                "kept_exposure_hours": float} for this session.
+
+    Returns:
+        (new_text, ['capture.key=value', ...] for keys actually changed).
+    """
+    on_disk = stats["lights_kept"] + stats["lights_rejected"]
+    if on_disk == 0:
+        return text, []
+
+    lines = text.splitlines(keepends=True)
+    start = end = None  # [capture] header index, next-section index
+    section = None
+    existing_captured = 0
+    for idx, line in enumerate(lines):
+        sm = re.match(r"\s*\[(\w+)\]", line)
+        if sm:
+            if section == "capture":
+                end = idx
+                break
+            section = sm.group(1)
+            if section == "capture":
+                start = idx
+            continue
+        if section == "capture":
+            fm = _CAPTURE_KEY_RE.match(line)
+            if fm and fm.group(2) == "lights_captured":
+                try:
+                    existing_captured = int(float(fm.group(4)))
+                except ValueError:
+                    pass
+
+    wanted = {
+        "lights_captured": max(existing_captured, on_disk),
+        "lights_kept": stats["lights_kept"],
+        "lights_rejected": stats["lights_rejected"],
+        "kept_exposure_hours": stats["kept_exposure_hours"],
+    }
+    changed = []
+    if start is None:
+        # File predates the [capture] section entirely: append one.
+        block = ["\n", "[capture]\n"]
+        for k in CAPTURE_KEYS:
+            block.append(f"{k} = {wanted[k]}\n")
+            changed.append(f"capture.{k}={wanted[k]}")
+        return "".join(lines) + "".join(block), changed
+    if end is None:
+        end = len(lines)
+    seen = set()
+    for idx in range(start + 1, end):
+        fm = _CAPTURE_KEY_RE.match(lines[idx])
+        if not fm:
+            continue
+        key = fm.group(2)
+        seen.add(key)
+        if str(wanted[key]) != fm.group(4):
+            lines[idx] = (
+                fm.group(1) + key + fm.group(3) + str(wanted[key]) + fm.group(5) + fm.group(6)
+            )
+            changed.append(f"capture.{key}={wanted[key]}")
+    insert_at = end
+    while insert_at > start + 1 and lines[insert_at - 1].strip() == "":
+        insert_at -= 1
+    for k in CAPTURE_KEYS:
+        if k not in seen:
+            lines.insert(insert_at, f"{k} = {wanted[k]}\n")
+            insert_at += 1
+            changed.append(f"capture.{k}={wanted[k]}")
+    return "".join(lines), changed
+
+
+# =============================================================================
 # Robust write  (network volumes occasionally reject a plain truncate-write)
 # =============================================================================
 def safe_write(path, text):
@@ -595,6 +727,9 @@ def main():
         print(f"Loaded calibration matches for {len(cal_matches)} sessions from tracker.db")
     else:
         print("No tracker.db (or pre-bias schema) - skipping calibration-match stamping")
+    capture_stats = load_capture_stats(args.db)
+    if capture_stats:
+        print(f"Loaded capture stats for {len(capture_stats)} sessions from tracker.db")
 
     notes = []
     for lib in astro_config.load_libraries(args.config):
@@ -611,7 +746,7 @@ def main():
         notes = [n for n in notes if args.only in n]
     print(f"Found {len(notes)} session notes.toml to process\n")
 
-    n_sky = n_weather = n_cal = n_skipped_weather = n_loc_unknown = n_offdate = 0
+    n_sky = n_weather = n_cal = n_capture = n_skipped_weather = n_loc_unknown = n_offdate = 0
     n_have_weather = 0  # already filled — API skipped
     n_write_fail = 0
     write_failed = []
@@ -678,6 +813,10 @@ def main():
         if cal:
             new_text, cal_changed = stamp_calibration(new_text, cal)
             filled += cal_changed
+        cap = capture_stats.get(session)
+        if cap:
+            new_text, cap_changed = stamp_capture(new_text, cap)
+            filled += cap_changed
 
         if filled and not args.dry_run:
             if not safe_write(path, new_text):
@@ -694,6 +833,8 @@ def main():
             n_weather += 1
         if any(f.startswith("calibration.") for f in filled):
             n_cal += 1
+        if any(f.startswith("capture.") for f in filled):
+            n_capture += 1
 
         tag = "DRY " if args.dry_run else ""
         src = {
@@ -721,6 +862,7 @@ def main():
     print(f"  sessions with sky fields filled    : {n_sky}")
     print(f"  sessions with weather fields filled: {n_weather}")
     print(f"  sessions with calibration matches stamped: {n_cal}")
+    print(f"  sessions with capture record stamped: {n_capture}")
     if n_have_weather:
         print(f"  sessions already had weather (skipped API): {n_have_weather}")
     if n_skipped_weather:

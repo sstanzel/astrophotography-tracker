@@ -158,46 +158,6 @@ Run phase (later): filename grammars + device layout profiles fully config-
 driven (new capture software = config edit, not a fits_parser change);
 dashboard "last import" tile from the ledger `runs` table.
 
-## TARGET_MISMATCH: frame-target vs session-name check, library-wide
-
-**Status:** ready · 2026-07-23
-
-The NGC 3718/3729 case (found live 2026-07-23): a session hand-named after
-the companion galaxy while every frame names the primary — caught by nothing,
-because the frame-target≠folder-target comparison exists only in preflight's
-staging gate, never across the existing library. Convention (decided
-2026-07-23): **a session is named for the intended target — the token typed
-into the capture software, carried in every frame filename — and files under
-whatever folder that token resolves to in the registry; other objects sharing
-the frame are not enumerated** (dual folders like "NGC 3718 3729" carry just
-enough names to identify the field, and resolve by their FIRST catalog number
-only). Build: a `TARGET_MISMATCH` warning in every-scan `validate()` (it is a
-structural naming check per CHECKS.md's split; the walk already parses every
-filename, so comparing the session token to the modal kept-light target is
-nearly free), `_adjacent`-aware — strip the suffix before comparing, and fix
-preflight's existing check the same way (its warning on `_adjacent` sessions
-is a false positive of the naive comparison). Registry aliasing (so e.g.
-NGC_3729 could resolve to the pair folder) noted as a possible later feature;
-not needed under the convention above.
-
-## [capture] record in notes.toml: reject counts that survive deletion
-
-**Status:** ready · 2026-07-23
-
-Prompted by NGC_1499 Redcat51 ASI585MCPro 2026-01-05 — a total-loss night
-(41 lights, all rejected, 0 kept) kept as a record of the attempt. The
-tracker is file-derived, so deleting rejected raws to reclaim space would
-erase the reject statistics on the next scan. Design (decided 2026-07-23):
-`populate_notes.py` stamps a tracker-owned `[capture]` section per session —
-`lights_captured` (high-water of kept+rejected, NEVER decreased),
-`lights_kept`, `lights_rejected`, `kept_exposure_hours` — refreshed each
-`refresh --notes` exactly like flats_match/bias_match, and left untouched
-once a session has zero lights on disk. Reject-rate analytics (percent by
-rig / camera / month) then need only [capture] + the session name; a
-report/dashboard surface for that is a separate later item. Note sweep.py
-never touches Rejected/ — the risk is only ever a future hand deletion,
-which is what the stamp survives.
-
 ## Open design questions (paper §11)
 
 **Status:** ideas, undecided · as of rev-2 paper 2026-07-10
@@ -214,6 +174,19 @@ Tracked in the paper; listed here so the backlog is one-stop:
 ---
 
 ## Done
+
+- **TARGET_MISMATCH (2026-07-23)** — every-scan validate() warning: session token ≠
+  the target its light frames name, compared via a canonical key (separators/case/
+  `_adjacent` stripped, so 2024-era 'M31' == 'M_31' and 'SH 2- 108' == 'SH2_108').
+  preflight's frame-vs-folder warning made adjacent-aware the same day. First
+  library-wide run: 7 real findings incl. a full duplicate night (SH2 223 data
+  copied into an SH2 233 session, 307 identical files, double-counted hours).
+- **[capture] notes.toml record (2026-07-23)** — populate_notes stamps tracker-owned
+  lights_captured (high-water, never decreased) / lights_kept / lights_rejected /
+  kept_exposure_hours per session; frozen once a session has no lights on disk, so
+  reject statistics survive any future deletion of the raws. 218 sessions stamped
+  on the first run (NGC_1499 total-loss night: 41/0/41). Percent-rejected analytics
+  by rig/camera/month remain a future report surface.
 
 - **Master file naming convention + `file_masters.py`** — adopted/shipped 2026-07-12.
   The proposed self-describing names are now the convention, enforced by the new
