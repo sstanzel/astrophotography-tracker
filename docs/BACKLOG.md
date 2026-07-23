@@ -180,6 +180,24 @@ is a false positive of the naive comparison). Registry aliasing (so e.g.
 NGC_3729 could resolve to the pair folder) noted as a possible later feature;
 not needed under the convention above.
 
+## [capture] record in notes.toml: reject counts that survive deletion
+
+**Status:** ready · 2026-07-23
+
+Prompted by NGC_1499 Redcat51 ASI585MCPro 2026-01-05 — a total-loss night
+(41 lights, all rejected, 0 kept) kept as a record of the attempt. The
+tracker is file-derived, so deleting rejected raws to reclaim space would
+erase the reject statistics on the next scan. Design (decided 2026-07-23):
+`populate_notes.py` stamps a tracker-owned `[capture]` section per session —
+`lights_captured` (high-water of kept+rejected, NEVER decreased),
+`lights_kept`, `lights_rejected`, `kept_exposure_hours` — refreshed each
+`refresh --notes` exactly like flats_match/bias_match, and left untouched
+once a session has zero lights on disk. Reject-rate analytics (percent by
+rig / camera / month) then need only [capture] + the session name; a
+report/dashboard surface for that is a separate later item. Note sweep.py
+never touches Rejected/ — the risk is only ever a future hand deletion,
+which is what the stamp survives.
+
 ## Open design questions (paper §11)
 
 **Status:** ideas, undecided · as of rev-2 paper 2026-07-10
