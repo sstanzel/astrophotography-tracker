@@ -158,6 +158,28 @@ Run phase (later): filename grammars + device layout profiles fully config-
 driven (new capture software = config edit, not a fits_parser change);
 dashboard "last import" tile from the ledger `runs` table.
 
+## TARGET_MISMATCH: frame-target vs session-name check, library-wide
+
+**Status:** ready · 2026-07-23
+
+The NGC 3718/3729 case (found live 2026-07-23): a session hand-named after
+the companion galaxy while every frame names the primary — caught by nothing,
+because the frame-target≠folder-target comparison exists only in preflight's
+staging gate, never across the existing library. Convention (decided
+2026-07-23): **a session is named for the intended target — the token typed
+into the capture software, carried in every frame filename — and files under
+whatever folder that token resolves to in the registry; other objects sharing
+the frame are not enumerated** (dual folders like "NGC 3718 3729" carry just
+enough names to identify the field, and resolve by their FIRST catalog number
+only). Build: a `TARGET_MISMATCH` warning in every-scan `validate()` (it is a
+structural naming check per CHECKS.md's split; the walk already parses every
+filename, so comparing the session token to the modal kept-light target is
+nearly free), `_adjacent`-aware — strip the suffix before comparing, and fix
+preflight's existing check the same way (its warning on `_adjacent` sessions
+is a false positive of the naive comparison). Registry aliasing (so e.g.
+NGC_3729 could resolve to the pair folder) noted as a possible later feature;
+not needed under the convention above.
+
 ## Open design questions (paper §11)
 
 **Status:** ideas, undecided · as of rev-2 paper 2026-07-10
