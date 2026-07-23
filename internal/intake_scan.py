@@ -176,6 +176,31 @@ def scan_source(source: dict, settings: dict) -> dict:
             out["scanned"] += 1
             out["bytes"] += st.st_size
             out[_classify(name, in_log_dir, copy_chn, rec)].append(rec)
+
+    # Optional [[source]] logs = "<dir>" — an extra folder walked entirely as
+    # a log directory, for setups whose guiding logs live outside the source
+    # root (PHD2 on a NINA PC). Records keep relpaths anchored to the source
+    # root (they may start with "../"), so copy/ledger paths work unchanged.
+    logs_dir = source.get("logs") or ""
+    if logs_dir and not os.path.isdir(logs_dir):
+        out["logs_dir_missing"] = logs_dir
+    elif logs_dir:
+        for dirpath, _dirnames, filenames in os.walk(logs_dir):
+            for name in sorted(filenames):
+                fpath = os.path.join(dirpath, name)
+                try:
+                    st = os.stat(fpath)
+                except OSError:
+                    continue
+                rec = {
+                    "relpath": os.path.relpath(fpath, root),
+                    "size": st.st_size,
+                    "mtime_ns": st.st_mtime_ns,
+                }
+                out["scanned"] += 1
+                out["bytes"] += st.st_size
+                cls = "junk" if _is_junk(name) else _classify_log(name, copy_chn)
+                out[cls].append(rec)
     return out
 
 

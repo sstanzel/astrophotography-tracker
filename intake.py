@@ -133,6 +133,10 @@ def load_intake_config(path: str) -> dict:
                 "label": str(b.get("label", "") or sid).strip(),
                 "path": spath,
                 "layout": layout,
+                # Optional extra directory walked as a log folder — for capture
+                # setups whose guiding logs live OUTSIDE the source root (e.g.
+                # PHD2 on a NINA PC writing to a sibling PHD2/ folder).
+                "logs": str(b.get("logs", "") or "").strip(),
             }
         )
     if not sources:
@@ -272,6 +276,9 @@ def show_config(cfg: dict, config_path: str) -> None:
         state = "mounted" if os.path.isdir(s["path"]) else "NOT MOUNTED"
         print(f"  [{s['id']}] {s['label']} — layout {s['layout']}, {state}")
         print(f"      {s['path']}")
+        if s["logs"]:
+            note = "" if os.path.isdir(s["logs"]) else "  (NOT FOUND)"
+            print(f"      logs: {s['logs']}{note}")
 
     print(f"\nRig mappings ({len(cfg['rigs'])}):")
     for r in cfg["rigs"]:
@@ -348,6 +355,8 @@ def render_census(source: dict, scan: dict, verbose: bool) -> int:
     )
     if scan["pruned_dirs"]:
         print(f"  pruned dirs (never entered): {', '.join(scan['pruned_dirs'])}")
+    if scan.get("logs_dir_missing"):
+        print(f"  warning: configured logs folder not found: {scan['logs_dir_missing']}")
 
     for rec in scan["quarantine"] if verbose else []:
         print(f"    quarantine: {rec['relpath']} — {rec.get('reason', '?')}")
@@ -636,6 +645,11 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
     plan = group_sessions(scans, cfg["rigs"], since=since, nights=nights)
 
     attention: list[str] = []
+    for sid, scan in sorted(scans.items()):
+        if scan.get("logs_dir_missing"):
+            attention.append(
+                f"{sid}: configured logs folder not found: {scan['logs_dir_missing']}"
+            )
     known_by_source = {sid: intake_ledger.known_files(con, sid) for sid in scans}
 
     for sess in plan["sessions"]:
@@ -657,6 +671,10 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
                     f"lights, library {lib_lights}"
                 )
                 attention.append(f"{sess['name']}: {sess['status_note']}")
+            if sess["logs"]:
+                # Hand-filed before intake existed; its logs stay at the
+                # import area — intake never writes into the library.
+                sess["status_note"] += f" · {len(sess['logs'])} log(s) stay at source"
             continue
 
         sess["status"] = "new"

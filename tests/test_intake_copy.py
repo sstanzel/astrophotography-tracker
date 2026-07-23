@@ -248,6 +248,35 @@ def test_stale_parts_cleaned_at_apply(tmp_path, monkeypatch):
     assert not stale.exists()
 
 
+def test_apply_external_logs_dir_lands_in_session(tmp_path, monkeypatch):
+    # A [[source]] logs= dir outside the root: the ../-anchored relpath must
+    # survive the copy path and the ledger round-trip.
+    cfg = make_env(tmp_path, monkeypatch)
+    phd2 = tmp_path / "PHD2"
+    write_file(str(phd2 / "PHD2_GuideLog_2026-07-08_221500.txt"))
+    cfg["sources"][0]["logs"] = str(phd2)
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(), scans)
+    intake.run_apply(cfg, make_args(), scans, ctx)
+
+    landed = (
+        tmp_path / "staging" / "M_5 RASA8 ASI2600MCAir 2026-07-08" / "log"
+        / "PHD2_GuideLog_2026-07-08_221500.txt"
+    )
+    assert landed.exists()
+    row = next(
+        r for r in intake.intake_ledger.all_copied_rows(ctx["con"])
+        if "PHD2_GuideLog" in r["relpath"]
+    )
+    assert row["relpath"].startswith("..")
+    # And a rerun offers nothing new for it.
+    ctx2 = intake.decide(cfg, make_args(apply=False), scans)
+    sess = next(s for s in ctx2["plan"]["sessions"] if s["status"] == "new")
+    log_files = [f for f in sess["files"] if "PHD2_GuideLog" in f["dest_rel"]]
+    assert log_files and all(f["decision"] == "skip" for f in log_files)
+
+
 def test_twin_guard_same_folder_night_different_name(tmp_path, monkeypatch):
     # The NGC 3718/3729 case: the night is in the library under the companion
     # galaxy's name — same destination folder + night, different session name.

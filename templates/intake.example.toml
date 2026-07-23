@@ -43,6 +43,12 @@ id     = "mele1"
 label  = "Mele 1 (NINA)"
 path   = "/Volumes/…/Astro_imports/Mele1_data/NINA"
 layout = "nina"
+# Optional: an extra folder walked entirely as a LOG directory, for setups
+# whose guiding logs live outside the source root (PHD2 on a NINA PC writes
+# wherever its "Log File Location" setting points — make sure the capture
+# copy includes it). Guide/Autorun logs found here attach to the night's
+# last session like any other log; PHD2_DebugLog files are ignored.
+logs   = "/Volumes/…/Astro_imports/Mele1_data/PHD2"
 
 # --- rigs: (source, camera token) → Scope + Sensor session tokens -----------
 # camera matches the parsed filename token exactly ("2600MC",

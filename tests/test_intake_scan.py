@@ -109,6 +109,36 @@ def test_scan_source_science_records_carry_night(tmp_path):
     assert flat["night"] == dt.date(2026, 5, 12)
 
 
+def test_scan_source_external_logs_dir(tmp_path):
+    # PHD2 on a NINA PC writes logs OUTSIDE the source root ([[source]] logs=).
+    source = make_nina_source(str(tmp_path / "nina"))
+    phd2 = tmp_path / "PHD2"
+    write_file(str(phd2 / "PHD2_GuideLog_2026-05-12_223000.txt"))
+    write_file(str(phd2 / "PHD2_DebugLog_2026-05-12_223000.txt"))
+    write_file(str(phd2 / ".DS_Store"))
+    source["logs"] = str(phd2)
+
+    scan = scan_source(source, SETTINGS)
+
+    logs = [os.path.basename(r["relpath"]) for r in scan["logs"]]
+    assert logs == ["PHD2_GuideLog_2026-05-12_223000.txt"]
+    assert scan["logs"][0]["relpath"].startswith("..")  # anchored to source root
+    assert any("DebugLog" in r["relpath"] for r in scan["ignored"])
+    assert not scan.get("logs_dir_missing")
+    buckets = ("science", "logs", "non_science", "ignored", "junk", "quarantine")
+    assert scan["scanned"] == sum(len(scan[k]) for k in buckets)
+
+
+def test_scan_source_missing_logs_dir_flagged(tmp_path):
+    source = make_nina_source(str(tmp_path / "nina"))
+    source["logs"] = str(tmp_path / "nowhere")
+
+    scan = scan_source(source, SETTINGS)
+
+    assert scan["logs_dir_missing"] == str(tmp_path / "nowhere")
+    assert scan["logs"] == []
+
+
 @pytest.mark.parametrize(
     "ts,expected",
     [
