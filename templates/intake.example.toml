@@ -49,10 +49,19 @@ layout = "nina"
 # "Poseidon-C PRO", "QHYminiCam8M"); "*" matches any camera on that source.
 # scope/sensor must be registry names (scope_values/, sensor_values/).
 #
-# Equipment swaps: add a dated entry — from/to are TOML dates (civil night,
-# inclusive, either may be omitted). A dated entry in range beats the
-# open-ended entry for the same (source, camera). Overlapping dated ranges
-# are a config error.
+# Equipment swaps — the workflow is CLOSE OUT, don't edit:
+#   1. Add `to = <last night in the old configuration>` to the entry that
+#      described the old reality (it becomes the dated history entry).
+#   2. Add a new open-ended block for the new reality.
+# Historical nights keep resolving correctly forever; swaps are additive
+# config, never code. The same recipe covers an `adjacent` role change.
+#
+# Mechanics: from/to are TOML dates bounding the CIVIL NIGHT, inclusive;
+# either may be omitted. A dated entry in range beats the open-ended entry
+# for the same (source, camera). Overlapping dated ranges are a config
+# error. Every plan prints which rule fired per session — `(open-ended
+# rule)` vs `(dated rule … → date)` — so a wrong bound is visible on the
+# exact nights it affects, before any --apply.
 #
 # adjacent = true appends "_adjacent" to the target token (second-rig
 # sessions shot on a field next to the main target — see preflight.py).

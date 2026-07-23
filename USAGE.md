@@ -83,6 +83,13 @@ python3 intake.py --reimport          # re-offer copies that vanished (deleted s
 python3 intake.py --show-config       # parsed sources, rig table, resolved paths
 ```
 
+When equipment changes (camera moves to another scope, a rig's `adjacent`
+role ends): **close out, don't edit** — add `to = <last night in the old
+configuration>` to the existing [[rig]] entry, then add a new open-ended
+entry for the new reality. Historical nights keep resolving correctly
+forever. The plan names the rule behind every session (`open-ended rule` /
+`dated rule … → date`), so review catches a wrong bound before any copy.
+
 Safety model: a file is offered until a verified copy of it exists (ledger row
 ⇔ hash-verified copy); collisions are never overwritten (`held` + attention);
 an interrupted run self-heals (`.part` leftovers cleaned, unledgered files
