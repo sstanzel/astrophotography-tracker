@@ -60,6 +60,30 @@ from fits_parser import parse as parse_fits, frame_kind, safe, is_non_science  #
 SESSION_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9_+\-]+)\s+(?P<scope>\S+)\s+(?P<sensor>\S+)\s+(?P<date>\d{4}-\d{2}-\d{2})$"
 )
+
+# Adjacent-field second-rig suffix — same literal as preflight.ADJACENT_SUFFIX
+# and intake_scan.ADJACENT_SUFFIX (kept in each module to avoid import cycles).
+ADJACENT_SUFFIX = "_adjacent"
+
+
+def target_base(token):
+    """A target token reduced to a comparison KEY (not a display form).
+
+    Strips the adjacent-field suffix, then all separators (spaces,
+    underscores, hyphens) and case — capture-software naming habits vary
+    across years ('M31', 'M 31', 'M_31'; 'SH 2- 108', 'SH2-108', 'SH2_108')
+    and those are the same target, not a mismatch worth flagging.
+
+    Args:
+        token: a session-name or frame-filename target token.
+
+    Returns:
+        The canonical comparison key, e.g. 'm31', 'sh2108', 'm12'.
+    """
+    t = token.replace(" ", "_")
+    if t.lower().endswith(ADJACENT_SUFFIX):
+        t = t[: -len(ADJACENT_SUFFIX)]
+    return re.sub(r"[ _\-]", "", t).lower()
 CATALOG_RE = re.compile(r"^(?P<cat>M|NGC|NCG|IC|C|SH2|LDN|HR)\s+(?P<rest>.+)$")
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
@@ -1297,6 +1321,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
             integration_s = 0.0
             unparsed = 0  # FITS-extension files whose name did not parse
             header_src = None  # first kept light .fit/.fits — sampled for headers
+            light_targets = {}  # frame target token -> count (kept + rejected)
             for abs_path, is_rej, m in walk_fits(spath):
                 if m is None:
                     # Count only raw-capture files that failed to parse — not
@@ -1382,6 +1407,9 @@ def ingest_library(con, library_id, root, obs, locations, log):
                 )
                 n_frames += 1
                 if ftype == "light":
+                    ft = safe(m, "target")
+                    if ft:
+                        light_targets[ft] = light_targets.get(ft, 0) + 1
                     if is_rej:
                         rejected += 1
                     else:
@@ -1392,6 +1420,16 @@ def ingest_library(con, library_id, root, obs, locations, log):
                             header_src = abs_path
                 else:
                     counts[ftype] += 1
+
+            # Sessions are named for the target the frames carry (decided
+            # 2026-07-23, the NGC 3718/3729 case) — flag a folder token that
+            # disagrees with what this session's lights actually name.
+            if light_targets and not tp["is_other"]:
+                modal = max(light_targets, key=light_targets.get)
+                if target_base(modal) != target_base(sm.group("target")):
+                    obs["target_mismatch"].append(
+                        (sid, rel_session, sm.group("target"), modal, light_targets[modal])
+                    )
 
             # Validation inputs: sample one light frame's FITS header, and read
             # the session's notes.toml. Both are best-effort.
@@ -2186,6 +2224,22 @@ def validate(con, locations, obs, log):
             "naming grammar — it was not ingested as a session.",
         )
 
+    # Session folder token disagrees with the target its light frames name
+    # (adjacent-aware; collected during the walk — frame tokens are not
+    # stored in the DB). Sessions are named for the target the frames carry.
+    for sid, rel, folder_tok, frame_tok, n in obs.get("target_mismatch", []):
+        add(
+            "warning",
+            "TARGET_MISMATCH",
+            "session",
+            sid,
+            rel,
+            f"{n} light frame(s) name target '{frame_tok}' but the session "
+            f"folder says '{folder_tok}' — sessions are named for the target "
+            f"the frames carry; rename the session folder (and its notes/"
+            f"project/Results names) to match.",
+        )
+
     # -------------------------------------------------------------- Tier 2 --
     # FITS-header cross-checks (one sampled light header per session).
     # Registry names that legitimately differ from INSTRUME beyond vendor
@@ -2436,6 +2490,7 @@ def main():
     # Structural observations the walk collects for the validate() pass.
     obs = {
         "unparsed_sessions": [],
+        "target_mismatch": [],
         "cal_empty": [],
         "integration_no_manifest": [],
         "integration_missing_member": [],

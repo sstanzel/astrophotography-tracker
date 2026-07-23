@@ -39,7 +39,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "internal"))
 import astro_config  # noqa: E402
-from scan import SESSION_RE, parse_target_folder, walk_fits  # noqa: E402
+from scan import SESSION_RE, parse_target_folder, target_base, walk_fits  # noqa: E402
 from fits_parser import frame_kind, safe, exposure_seconds, is_non_science  # noqa: E402
 
 # Session date is the local civil evening; UTC frame stamps can roll past
@@ -220,7 +220,9 @@ def check_session(
         )
 
     for ft, n in frame_targets.items():
-        if ft.replace(" ", "_") != target_tok:
+        # Adjacent-aware: 'M 12', 'M_12 adjacent' and folder token
+        # 'M_12_adjacent' are the same target — only a real disagreement warns.
+        if target_base(ft) != target_base(target_tok):
             warnings.append(f"{n} light frame(s) name target {ft!r} ≠ folder target {target_tok!r}")
     if date_skew:
         warnings.append(
