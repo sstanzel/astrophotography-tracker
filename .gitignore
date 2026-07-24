@@ -22,3 +22,6 @@ package.json
 package-lock.json
 .claude/
 .venv/
+
+# --- Office lock files (workbook open in Excel) ---
+~$*
