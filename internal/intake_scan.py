@@ -21,10 +21,13 @@ import datetime as dt
 import os
 import re
 import sys
+import zoneinfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import astro_config  # noqa: E402
 import fits_parser  # noqa: E402
 from fits_parser import frame_kind, is_non_science, safe  # noqa: E402
+from scan import RAW_IMAGE_EXT  # noqa: E402  (single source for raw formats)
 
 WILDCARD_CAMERA = "*"
 
@@ -58,7 +61,18 @@ LAYOUT_PROFILES = {
         },
         "log_dirs": set(),
     },
+    # Bare camera-card dumps (Canon R5 CR3s and kin): no capture software, no
+    # metadata in the filenames — night comes from mtime, semantics from the
+    # dump folder's name (see _classify_dslr).
+    "dslr": {
+        "prune_dirs": {"_CCC SafetyNet"},
+        "log_dirs": set(),
+    },
 }
+
+# A dslr dump folder whose name carries one of these tokens holds calibration
+# frames (reported, never staged); any other name is read as a target name.
+DSLR_CAL_TOKENS = ("calibration", "dark", "bias", "flat")
 
 # ASIAir writes a Chinese duplicate of every Autorun log.
 CHN_LOG_SUFFIX = "_CHN.txt"
@@ -79,11 +93,17 @@ GRAMMAR_NAMES = {
 def frame_timestamp(m) -> dt.datetime | None:
     """Capture timestamp from a parsed frame match (device-local time).
 
+    Both stamp families write the capture device's local wall clock: ASIAir
+    'dt' tokens (verified against library evening sessions — a 22:36 stamp on
+    the session's own date) and NINA 'date'+'time' tokens (the capture PC's
+    clock). No timezone conversion is ever needed for filename stamps; the
+    [intake] timezone matters only for mtime-dated card dumps.
+
     Args:
         m: regex match from fits_parser.parse().
 
     Returns:
-        datetime, or None when the digits are not a real calendar time.
+        Naive datetime, or None when the digits are not a real calendar time.
     """
     stamp = safe(m, "dt")
     try:
@@ -97,8 +117,27 @@ def frame_timestamp(m) -> dt.datetime | None:
     return None
 
 
+def load_timezone(name: str) -> dt.tzinfo:
+    """The configured capture timezone ([intake] timezone).
+
+    Only mtime-dated files (dslr card dumps) need it: an mtime is an absolute
+    epoch instant, and turning it into a civil-night date requires the wall
+    clock of wherever the shutter fired. Filename stamps are already local.
+
+    Args:
+        name: IANA zone name, e.g. "America/Denver".
+
+    Raises:
+        SystemExit: on an unknown zone name (config error, fail loud).
+    """
+    try:
+        return zoneinfo.ZoneInfo(name)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        raise SystemExit(f"[intake] timezone {name!r} is not a known IANA timezone")
+
+
 def civil_night(ts: dt.datetime) -> dt.date:
-    """The civil night a timestamp belongs to (local-noon cutoff)."""
+    """The civil night a local timestamp belongs to (local-noon cutoff)."""
     if ts.hour < CIVIL_NOON_HOUR:
         return ts.date() - dt.timedelta(days=1)
     return ts.date()
@@ -138,8 +177,10 @@ def scan_source(source: dict, settings: dict) -> dict:
         every record carries relpath/size/mtime_ns.
     """
     root = source["path"]
-    profile = LAYOUT_PROFILES[source["layout"]]
+    layout = source["layout"]
+    profile = LAYOUT_PROFILES[layout]
     copy_chn = settings.get("copy_chn_logs", False)
+    tz = load_timezone(settings.get("timezone") or astro_config.DEFAULT_TIMEZONE)
 
     out: dict = {
         "science": [],
@@ -175,7 +216,13 @@ def scan_source(source: dict, settings: dict) -> dict:
             }
             out["scanned"] += 1
             out["bytes"] += st.st_size
-            out[_classify(name, in_log_dir, copy_chn, rec)].append(rec)
+            if layout == "dslr":
+                dump = rec["relpath"].split(os.sep, 1)
+                dump_label = dump[0] if len(dump) == 2 else os.path.basename(root)
+                cls = _classify_dslr(name, rec, dump_label, tz)
+            else:
+                cls = _classify(name, in_log_dir, copy_chn, rec)
+            out[cls].append(rec)
 
     # Optional [[source]] logs = "<dir>" — an extra folder walked entirely as
     # a log directory, for setups whose guiding logs live outside the source
@@ -205,7 +252,12 @@ def scan_source(source: dict, settings: dict) -> dict:
 
 
 def _classify(name: str, in_log_dir: bool, copy_chn: bool, rec: dict) -> str:
-    """Give one file its disposition; science records gain parse fields."""
+    """Give one file its disposition; science records gain parse fields.
+
+    Science records carry 'ts' (device-local capture time, drives the civil
+    night) and 'sig' — the stamp exactly as written in the filename, the
+    identity token the library dedupe probe compares across renames.
+    """
     if _is_junk(name):
         return "junk"
     if in_log_dir:
@@ -229,10 +281,50 @@ def _classify(name: str, in_log_dir: bool, copy_chn: bool, rec: dict) -> str:
         target=safe(m, "target", ""),
         ts=ts,
         night=civil_night(ts),
+        sig=ts.isoformat(),
         exp=m.group("exp"),
         unit=safe(m, "unit", "s"),
         gain=safe(m, "gain", "?"),
         temp=safe(m, "temp", "?"),
+    )
+    return "science"
+
+
+def _classify_dslr(name: str, rec: dict, dump_label: str, tz: dt.tzinfo) -> str:
+    """Disposition for a file in a dslr card-dump source.
+
+    Raw camera files (CR3 and kin) carry nothing in their names, so the night
+    comes from mtime (camera-written capture time, preserved by CCC/Finder
+    copies and by intake's own copy protocol) and the meaning comes from the
+    dump folder's name: a calibration-token name is a calibration dump
+    (reported, never staged), anything else is a target name. FITS files in a
+    dslr source (an ASIAir-run DSLR night copied to the same card) still go
+    through the normal grammar classifier — without a log dir.
+    """
+    if _is_junk(name):
+        return "junk"
+    if name.lower().endswith(FITS_EXTS):
+        return _classify(name, False, False, rec)
+    if not name.lower().endswith(RAW_IMAGE_EXT):
+        return "ignored"
+    mtime_s = rec["mtime_ns"] // 1_000_000_000
+    ts = dt.datetime.fromtimestamp(mtime_s, tz=tz).replace(tzinfo=None)
+    label_l = dump_label.lower()
+    is_cal = any(tok in label_l for tok in DSLR_CAL_TOKENS)
+    # The camera token is the filename prefix (R5__5328.CR3 → "R5"); map rigs
+    # with camera = "*" when a card names files differently.
+    rec.update(
+        kind="raw cal" if is_cal else "light",
+        grammar="raw card dump",
+        cam=name.split("_")[0] or "raw",
+        target="" if is_cal else dump_label,
+        ts=ts,
+        night=civil_night(ts),
+        sig=str(mtime_s),
+        exp="?",
+        unit="",
+        gain="?",
+        temp="?",
     )
     return "science"
 

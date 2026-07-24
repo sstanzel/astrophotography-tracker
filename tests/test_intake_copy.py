@@ -417,3 +417,161 @@ def test_ignore_block_excludes_session(tmp_path, monkeypatch):
     code = intake.run_apply(cfg, make_args(), scans, ctx)
     assert code == 0
     assert not (tmp_path / "staging" / "M_5 RASA8 ASI2600MCAir 2026-07-08").exists()
+
+
+# --------------------------------------------------------------------------
+# ±1-day dedupe probe — night-of vs hand-named dates (the M 63 case)
+# --------------------------------------------------------------------------
+def _library_with_session(tmp_path, monkeypatch, name, light_names,
+                          folder="M 5 globular cluster"):
+    """A real on-disk library session + an index pointing at it."""
+    sdir = tmp_path / "lib" / folder / name
+    for ln in light_names:
+        write_file(str(sdir / "Light" / ln))
+    is_adjacent = name.split(" ")[0].lower().endswith("_adjacent")
+    monkeypatch.setattr(
+        intake, "build_library_index",
+        lambda: {
+            "names": {name: str(sdir)},
+            "by_folder_night": {(folder, name.split(" ")[-1]): [(name, is_adjacent)]},
+            "libraries": [],
+        },
+    )
+    return sdir
+
+
+def test_date_off_full_match_auto_skips(tmp_path, monkeypatch):
+    # The M 63 case: identical frames hand-filed under the NEXT day's date.
+    cfg = make_env(tmp_path, monkeypatch)
+    _library_with_session(
+        tmp_path, monkeypatch, "M_5 RASA8 ASI2600MCAir 2026-07-09",
+        [LIGHT.format(i=i) for i in range(3)],
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    sess = ctx["plan"]["sessions"][0]
+    assert sess["status"] == "already"
+    assert "library dates it 2026-07-09" in sess["status_note"]
+    assert "timestamps match" in sess["status_note"]
+    assert any("library dates it 2026-07-09" in line for line in ctx["attention"])
+    assert intake.run_apply(cfg, make_args(), scans, ctx) == 0
+    assert not (tmp_path / "staging" / "M_5 RASA8 ASI2600MCAir 2026-07-08").exists()
+
+
+def test_date_off_partial_overlap_holds(tmp_path, monkeypatch):
+    # Only some source lights exist in the date-off library session: never
+    # copy on ambiguity — every copy decision becomes a hold.
+    cfg = make_env(tmp_path, monkeypatch)
+    _library_with_session(
+        tmp_path, monkeypatch, "M_5 RASA8 ASI2600MCAir 2026-07-09",
+        [LIGHT.format(i=0),
+         "Light_M 5_300.0s_Bin1_2600MC_gain100_20260709-231500_-10.0C_0099.fit"],
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    sess = ctx["plan"]["sessions"][0]
+    assert sess["status"] == "new"
+    science = [f for f in sess["files"] if f["label"] != "logs"]
+    assert science and all(f["decision"] == "hold" for f in science)
+    assert any("review before staging" in line for line in ctx["attention"])
+    assert intake.run_apply(cfg, make_args(), scans, ctx) == 0  # nothing to copy
+
+
+def test_consecutive_night_same_target_stays_new(tmp_path, monkeypatch):
+    # A REAL adjacent-night session of the same target (multi-night campaign)
+    # shares the ±1 name but no frames — it must not dedupe or warn.
+    cfg = make_env(tmp_path, monkeypatch)
+    _library_with_session(
+        tmp_path, monkeypatch, "M_5 RASA8 ASI2600MCAir 2026-07-09",
+        ["Light_M 5_300.0s_Bin1_2600MC_gain100_20260709-224%d00_-10.0C_00%d.fit" % (i, i)
+         for i in range(3)],
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    sess = ctx["plan"]["sessions"][0]
+    assert sess["status"] == "new"
+    assert all(f["decision"] == "copy" for f in sess["files"])
+    assert not any("duplicate" in line or "library dates it" in line
+                   for line in ctx["attention"])
+
+
+def test_exact_name_hit_reports_timestamp_match(tmp_path, monkeypatch):
+    cfg = make_env(tmp_path, monkeypatch)
+    _library_with_session(
+        tmp_path, monkeypatch, "M_5 RASA8 ASI2600MCAir 2026-07-08",
+        [LIGHT.format(i=i) for i in range(3)],
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    sess = ctx["plan"]["sessions"][0]
+    assert sess["status"] == "already"
+    assert "timestamps match (3 lights)" in sess["status_note"]
+
+
+def test_exact_name_hit_count_mismatch_flagged(tmp_path, monkeypatch):
+    cfg = make_env(tmp_path, monkeypatch)
+    _library_with_session(
+        tmp_path, monkeypatch, "M_5 RASA8 ASI2600MCAir 2026-07-08",
+        [LIGHT.format(i=0)],  # library kept fewer lights than the source has
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    sess = ctx["plan"]["sessions"][0]
+    assert sess["status"] == "already"
+    assert "count mismatch" in sess["status_note"]
+    assert any("count mismatch" in line for line in ctx["attention"])
+
+
+def test_date_off_twin_warns_only_on_content_overlap(tmp_path, monkeypatch):
+    # Same destination folder, adjacent night, different session name: warn
+    # only when frames actually overlap (companion-name + off-by-one date).
+    cfg = make_env(tmp_path, monkeypatch)
+    twin = "M_5_companion RASA8 ASI2600MCAir 2026-07-09"
+    sdir = tmp_path / "lib" / "M 5 globular cluster" / twin
+    for i in range(3):
+        write_file(str(sdir / "Light" / LIGHT.format(i=i)))
+    monkeypatch.setattr(
+        intake, "build_library_index",
+        lambda: {
+            "names": {twin: str(sdir)},
+            "by_folder_night": {("M 5 globular cluster", "2026-07-09"): [(twin, False)]},
+            "libraries": [],
+        },
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    assert any("already in M_5_companion" in line and "duplicate" in line
+               for line in ctx["attention"])
+
+
+def test_date_off_twin_disjoint_content_is_silent(tmp_path, monkeypatch):
+    cfg = make_env(tmp_path, monkeypatch)
+    twin = "M_5_companion RASA8 ASI2600MCAir 2026-07-09"
+    sdir = tmp_path / "lib" / "M 5 globular cluster" / twin
+    write_file(str(sdir / "Light" /
+                   "Light_M 5_300.0s_Bin1_2600MC_gain100_20260709-231500_-10.0C_0099.fit"))
+    monkeypatch.setattr(
+        intake, "build_library_index",
+        lambda: {
+            "names": {twin: str(sdir)},
+            "by_folder_night": {("M 5 globular cluster", "2026-07-09"): [(twin, False)]},
+            "libraries": [],
+        },
+    )
+    scans = scan_all(cfg)
+
+    ctx = intake.decide(cfg, make_args(apply=False), scans)
+
+    assert not any("duplicate" in line for line in ctx["attention"])

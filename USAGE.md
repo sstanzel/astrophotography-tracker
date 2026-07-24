@@ -115,12 +115,38 @@ Safety model: a file is offered until a verified copy of it exists (ledger row
 ⇔ hash-verified copy); collisions are never overwritten (`held` + attention);
 an interrupted run self-heals (`.part` leftovers cleaned, unledgered files
 simply re-offer); sessions already in a library are never re-copied (with a
-light-count cross-check); a same-target+night session under a different name
-raises a would-duplicate warning instead of copying. Autorun/PHD2 logs copy to
-the night's LAST session (`log/`) — one home per night, even when guiding
-spanned targets. Long darks/bias are reported as calibration sets, not staged.
-The ledger (`_organization/intake_ledger.db`) is durable primary state —
-unlike tracker.db, never delete it casually.
+frame-timestamp cross-check); a same-target+night session under a different
+name raises a would-duplicate warning instead of copying. Autorun/PHD2 logs
+copy to the night's LAST session (`log/`) — one home per night, even when
+guiding spanned targets. Long darks/bias are reported as calibration sets, not
+staged. The ledger (`_organization/intake_ledger.db`) is durable primary state
+— unlike tracker.db, never delete it casually.
+
+**Night-of dating + the ±1-day dedupe probe.** Session dates follow the
+night-of convention: every frame captured between local noon on day D and
+local noon on D+1 belongs to the session dated D — a night whose only lights
+start after midnight still gets the evening's date. Filename stamps (ASIAir
+and NINA alike) are device-local, so no timezone math is involved; the
+`[intake] timezone` key only dates mtime-based frames (the `dslr` card-dump
+layout). Historical hand-filed sessions sometimes carry the morning's date
+instead (`audit.py`'s `NIGHT_OF_DATE` warning lists them); the dedupe probe
+therefore also checks the same rig's session name one day either side and
+compares frame timestamps — a full match classifies as already-in-library
+(with an attention line naming the library's date), a partial overlap holds
+the whole session for review, and a disjoint adjacent-night session of the
+same target (a normal multi-night campaign) passes untouched.
+
+**Canon R5 / card-dump sources (`layout = "dslr"`).** For raw card dumps
+(CR3/NEF/…, nothing parseable in the filenames): the night comes from each
+file's mtime through `[intake] timezone`, the meaning from the dump folder's
+name — calibration/dark/bias/flat-token folders are reported like other
+calibration (not staged); any other folder name is the target name and stages
+as a normal session (`M_31 Redcat51 CanonR5 2026-07-13`). Map the rig with
+`camera = "*"` (raw names carry no camera token). An R5 shot *through the
+ASIAir* needs none of this — those FITS files use the asiair-dslr grammar and
+flow through an `asiair` source. Traveling? Set `timezone` to the trip's zone
+for that import run and set it back after; the date is baked into folder
+names at `--apply`, so a wrong zone is fixable only by rename.
 
 ## After every capture night
 

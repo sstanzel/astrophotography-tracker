@@ -282,6 +282,38 @@ Phases: (1) first mosaic planned → suffix family + target_base + twin guard;
 (2) first stacking → membership panel filter + panel-balance table;
 (3) first assembly → kind="mosaic".
 
+## Rename `frames.captured_at_utc` → device-local semantics
+
+The column name says UTC but every value is the capture device's LOCAL wall
+clock, copied verbatim from the filename stamp (verified 2026-07-24: an
+ASIAir evening session carries 22:36 stamps on its own date — ASIAir stamps
+local, same as NINA). Nothing is wrong functionally — all consumers
+(validate's DATE_MISMATCH, audit's NIGHT_OF_DATE, exports) treat it as local
+— but the name misleads readers into adding timezone conversions (it nearly
+shipped one). Rename to `captured_at_local` in schema.sql + scan.py + every
+query on the next schema-touching change; not worth a migration on its own.
+
+## Per-location timezone for dslr card dumps
+
+`[intake] timezone` is a single global key (default America/Denver in
+astro_config.DEFAULT_TIMEZONE), flipped by hand for an away-from-home import
+run. Only mtime-dated frames (dslr layout) use it — filename stamps are
+device-local and immune. If traveling imports become routine, a per-source
+`timezone` override on the [[source]] block is the natural shape. Also note:
+morning daytime captures (a 9 AM solar/lunar card dump) date to the previous
+civil night under the strict noon rule — if that ever bites a dslr import,
+consider a per-source "date by calendar day" switch for daytime work.
+
+## NIGHT_OF_DATE renames (19 sessions, found 2026-07-24)
+
+`audit.py` flags 19 deep-sky library sessions hand-dated by their morning
+instead of night-of (the M 63 duplicate-import near-miss plus 18 more,
+mostly winter after-midnight starts). The ±1-day dedupe probe makes them
+safe against re-import, so renaming is cosmetic consistency: folder + inner
+names (notes.toml, `{name} Results`, `.pxiproject`) + re-scan. A small
+preview/--apply rename helper following the catalog.py pattern would do all
+19 in one pass.
+
 ## Open design questions (paper §11)
 
 **Status:** ideas, undecided · as of rev-2 paper 2026-07-10

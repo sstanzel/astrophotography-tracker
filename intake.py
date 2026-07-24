@@ -53,7 +53,7 @@ from intake_scan import (  # noqa: E402
     LOG_SUBDIR,
 )
 
-VALID_LAYOUTS = ("asiair", "nina")
+VALID_LAYOUTS = ("asiair", "nina", "dslr")
 VALID_HASHES = ("sha256", "sha1", "md5")
 DEFAULT_LEDGER_NAME = "intake_ledger.db"
 
@@ -107,9 +107,20 @@ def load_intake_config(path: str) -> dict:
         "hash": str(settings_raw.get("hash", "sha256") or "sha256").lower(),
         "copy_chn_logs": bool(settings_raw.get("copy_chn_logs", False)),
         "ledger": str(settings_raw.get("ledger", "") or ""),
+        # The capture location's IANA zone — dates mtime-based frames (dslr
+        # card dumps; filename stamps are already device-local). Change it
+        # for an away-from-home import run, then change it back; see USAGE.md.
+        "timezone": str(
+            settings_raw.get("timezone", astro_config.DEFAULT_TIMEZONE)
+            or astro_config.DEFAULT_TIMEZONE
+        ),
     }
     if settings["hash"] not in VALID_HASHES:
         errors.append(f"[intake] hash {settings['hash']!r} not one of {VALID_HASHES}")
+    try:
+        intake_scan.load_timezone(settings["timezone"])
+    except SystemExit as exc:
+        errors.append(str(exc))
 
     sources: list[dict] = []
     seen_ids: set[str] = set()
@@ -270,6 +281,7 @@ def show_config(cfg: dict, config_path: str) -> None:
     else:
         print("pxiproject    : not set — session projects will not be stamped")
     print(f"CHN logs      : {'copied' if settings['copy_chn_logs'] else 'skipped'}")
+    print(f"Timezone      : {settings['timezone']}  (civil-night dating)")
 
     print(f"\nSources ({len(cfg['sources'])}):")
     for s in cfg["sources"]:
@@ -454,12 +466,27 @@ SCRATCH_DIR_MARKERS = ("PI Process", "PI Magic")
 SCRATCH_DIR_SUFFIXES = (".pxiproject", " Results")
 
 
-def count_library_lights(session_path: str) -> int:
-    """Light frames (kept + Rejected) in an existing library session,
-    excluding processing-scratch and results folders."""
+def library_light_signature(session_path: str) -> tuple[int, set[str]]:
+    """Light frames (kept + Rejected) in an existing library session:
+    count plus their capture-identity tokens, excluding processing-scratch
+    and results folders.
+
+    The identity token matches what the intake scanner records per source
+    frame ('sig'): for FITS lights the filename timestamp exactly as stamped
+    (it survives every rename pass — rot-first, hand fixes — and never
+    depends on the configured timezone); for DSLR raw images (CR3 and kin,
+    which carry nothing in their names) the mtime in epoch seconds, preserved
+    end-to-end by CCC and intake's own copy protocol. Signature overlap
+    therefore means the same physical capture set — the check that lets the
+    ±1-day dedupe probe tell an off-by-one duplicate from a genuine
+    consecutive-night session.
+    """
     from fits_parser import frame_kind, parse
+    from intake_scan import frame_timestamp
+    from scan import RAW_IMAGE_EXT
 
     n = 0
+    sigs: set[str] = set()
     for root, dirs, files in os.walk(session_path):
         dirs[:] = [
             d
@@ -467,12 +494,30 @@ def count_library_lights(session_path: str) -> int:
             if d not in SCRATCH_DIR_MARKERS and not d.endswith(SCRATCH_DIR_SUFFIXES)
         ]
         for f in files:
-            if f.startswith("._") or not f.lower().endswith((".fit", ".fits", ".xisf")):
+            if f.startswith("._"):
                 continue
-            m = parse(f)
-            if m is not None and frame_kind(m) == "light":
+            if f.lower().endswith((".fit", ".fits", ".xisf")):
+                m = parse(f)
+                if m is None or frame_kind(m) != "light":
+                    continue
                 n += 1
-    return n
+                ts = frame_timestamp(m)
+                if ts is not None:
+                    sigs.add(ts.isoformat())
+            elif f.lower().endswith(RAW_IMAGE_EXT):
+                # A raw file can't declare its frame type; anything inside the
+                # session-local calibration folder is a flat, not a light.
+                rel = os.path.relpath(root, session_path)
+                if any(part.startswith("Flat ") for part in rel.split(os.sep)):
+                    continue
+                fpath = os.path.join(root, f)
+                try:
+                    st = os.stat(fpath)
+                except OSError:
+                    continue
+                n += 1
+                sigs.add(str(st.st_mtime_ns // 1_000_000_000))
+    return n, sigs
 
 
 def load_registry_vocab() -> dict:
@@ -661,17 +706,53 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
             continue
 
         existing = lib_index["names"].get(sess["name"])
+        date_off_note = ""
+        overlap_hold = ""
+        if not existing:
+            # Night-of vs hand-named dates can disagree by one day (a night
+            # whose lights all start after midnight). Probe the same rig name
+            # on the adjacent dates and compare capture signatures — counts
+            # alone can't tell an off-by-one duplicate from a genuine
+            # consecutive-night session of the same target.
+            src_sigs = {r["sig"] for r in sess["lights"]}
+            for delta in (-1, 1):
+                alt_night = sess["night"] + dt.timedelta(days=delta)
+                alt_name = " ".join(sess["name"].split(" ")[:-1] + [alt_night.isoformat()])
+                alt_path = lib_index["names"].get(alt_name)
+                if not alt_path:
+                    continue
+                _lib_n, lib_sigs = library_light_signature(alt_path)
+                if src_sigs and src_sigs <= lib_sigs:
+                    existing = alt_path
+                    date_off_note = f"as {alt_name} (library dates it {alt_night}) — timestamps match"
+                    break
+                if src_sigs & lib_sigs:
+                    overlap_hold = (
+                        f"{len(src_sigs & lib_sigs)} of {len(src_sigs)} source lights already "
+                        f"in {alt_name} (library dates it {alt_night}) — held, review before staging"
+                    )
+                    break
+
         if existing:
             sess["status"] = "already"
-            lib_lights = count_library_lights(existing)
-            if lib_lights == len(sess["lights"]):
-                sess["status_note"] = f"already in library — counts match ({lib_lights} lights)"
-            else:
-                sess["status_note"] = (
-                    f"already in library — count mismatch: source {len(sess['lights'])} "
-                    f"lights, library {lib_lights}"
-                )
+            if date_off_note:
+                sess["status_note"] = f"already in library {date_off_note}"
                 attention.append(f"{sess['name']}: {sess['status_note']}")
+            else:
+                lib_lights, lib_sigs = library_light_signature(existing)
+                src_sigs = {r["sig"] for r in sess["lights"]}
+                if src_sigs and src_sigs <= lib_sigs:
+                    sess["status_note"] = (
+                        f"already in library — timestamps match ({lib_lights} lights)"
+                    )
+                elif lib_lights == len(sess["lights"]):
+                    sess["status_note"] = f"already in library — counts match ({lib_lights} lights)"
+                else:
+                    sess["status_note"] = (
+                        f"already in library — count mismatch: source {len(sess['lights'])} "
+                        f"lights, library {lib_lights}"
+                    )
+                    attention.append(f"{sess['name']}: {sess['status_note']}")
             if sess["logs"]:
                 # Hand-filed before intake existed; its logs stay at the
                 # import area — intake never writes into the library.
@@ -725,6 +806,17 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
                     }
                 )
 
+        if overlap_hold:
+            # Some (not all) of this session's lights already sit in a
+            # date-off library session — never copy on ambiguity; a human
+            # resolves whether it's a split night or a partial hand-filing.
+            sess["status_note"] = overlap_hold
+            attention.append(f"{sess['name']}: {overlap_hold}")
+            for f in sess["files"]:
+                if f["decision"] == "copy":
+                    f["decision"] = "hold"
+                    f["note"] = f["note"] or "partial overlap with a date-off library session"
+
         if gone_held:
             gone_sessions.add(sess["name"])
             attention.append(
@@ -760,6 +852,26 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
                 f"{sess['name']}: this folder + night is already in the library as "
                 f"{', '.join(twins)} — staging/filing this would duplicate that night"
             )
+        elif not overlap_hold:  # a name-probe overlap is already reported above
+            # Date-off twins: same destination folder on the adjacent night
+            # under another name. Adjacent-night sessions of one target are
+            # routine (multi-night campaigns), so warn only when capture
+            # signatures actually overlap — content, not names, is the tell.
+            src_sigs = {r["sig"] for r in sess["lights"]}
+            for delta in (-1, 1):
+                alt_night = (sess["night"] + dt.timedelta(days=delta)).isoformat()
+                for name, is_adjacent in lib_index["by_folder_night"].get(
+                    (dest_folder, alt_night), []
+                ):
+                    if name == sess["name"] or is_adjacent != planned_adjacent:
+                        continue
+                    _n, lib_sigs = library_light_signature(lib_index["names"][name])
+                    if src_sigs & lib_sigs:
+                        attention.append(
+                            f"{sess['name']}: {len(src_sigs & lib_sigs)} of its lights are "
+                            f"already in {name} (library dates it {alt_night}) — "
+                            f"staging/filing this would duplicate that night"
+                        )
 
     # Reconciliation: every ledger row's copy must still exist somewhere.
     missing_by_session: dict[str, int] = {}
@@ -848,7 +960,10 @@ def render_plan(cfg: dict, args, scans: dict[str, dict], ctx: dict) -> int:
                     n_skip += f["decision"] == "skip"
                     n_hold += f["decision"] == "hold"
             if counts["copy"] == 0:
-                status = "nothing to copy — all files already imported"
+                if counts["hold"]:
+                    status = sess["status_note"] or "held — see attention"
+                else:
+                    status = "nothing to copy — all files already imported"
                 print(f"  {sess['name']:<52} {status}")
                 continue
 

@@ -82,6 +82,7 @@ data-quality section (see BACKLOG.md).
 | `MIXED_BINNING` | Kept lights at more than one binning | Same treatment as mixed gain |
 | `TEMP_RUNAWAY` | Cooled sensor spread >5 °C across kept lights | Check the cooler; consider culling the warm subs |
 | `ALL_REJECTED` | Every light rejected — total-loss night | Reshoot or retire the session |
+| `NIGHT_OF_DATE` | Session folder dated by its morning: the lights' civil night (noon-rollover, device-local stamps) differs from the folder date. Deep-sky only; other-capture (daytime Moon/Sun, EAA) exempt | Latent duplicate-import trap — intake's ±1-day probe covers it; rename to the night-of date when convenient |
 | `CAL_NESTED_SET` | Calibration set folder nested inside another (WBPP `master/`+`logs/` leftovers) | File the master next to the raws, remove the subfolder |
 | `FLATS_HOST_EMPTY` | Sibling-flats pointer to a session with no flats | Fix the notes.toml pointer |
 

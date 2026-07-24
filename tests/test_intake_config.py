@@ -194,3 +194,53 @@ def test_resolve_rig_unmapped_returns_none():
     rig, rule = resolve_rig(RIGS, "other-source", "2600MC", dt.date(2026, 5, 1))
 
     assert rig is None and rule is None
+
+
+def test_load_intake_config_timezone_default_and_override(intake_toml, tmp_path):
+    src = tmp_path / "device"
+    src.mkdir()
+    from conftest import MINIMAL_CONFIG
+    body = MINIMAL_CONFIG.format(src=src)
+    import intake
+
+    cfg = intake.load_intake_config(intake_toml(body))
+    assert cfg["settings"]["timezone"] == "America/Denver"
+
+    cfg2 = intake.load_intake_config(
+        intake_toml('[intake]\ntimezone = "Atlantic/Reykjavik"\n' + body)
+    )
+    assert cfg2["settings"]["timezone"] == "Atlantic/Reykjavik"
+
+
+def test_load_intake_config_bad_timezone_rejected(intake_toml, tmp_path):
+    src = tmp_path / "device"
+    src.mkdir()
+    from conftest import MINIMAL_CONFIG
+    body = '[intake]\ntimezone = "Mars/Olympus_Mons"\n' + MINIMAL_CONFIG.format(src=src)
+    import intake
+    import pytest
+
+    with pytest.raises(SystemExit, match="timezone"):
+        intake.load_intake_config(intake_toml(body))
+
+
+def test_load_intake_config_dslr_layout_accepted(intake_toml, tmp_path):
+    src = tmp_path / "card"
+    src.mkdir()
+    body = f"""
+[[source]]
+id = "r5"
+label = "R5 card"
+path = "{src}"
+layout = "dslr"
+
+[[rig]]
+source = "r5"
+camera = "*"
+scope = "Redcat51"
+sensor = "CanonR5"
+"""
+    import intake
+
+    cfg = intake.load_intake_config(intake_toml(body))
+    assert cfg["sources"][0]["layout"] == "dslr"

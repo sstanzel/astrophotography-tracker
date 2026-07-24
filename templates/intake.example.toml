@@ -27,10 +27,35 @@ copy_chn_logs = false
 # "_organization/intake_ledger.db". Primary state — never delete casually.
 ledger = ""
 
+# IANA timezone of the capture site. Filename stamps (ASIAir + NINA) are
+# device-local and never need it; it only dates mtime-based frames — the
+# "dslr" card-dump layout below. For an away-from-home card import (Iceland,
+# …) set the trip's zone for that run, then set it back. The date is baked
+# into the session folder name at --apply; changing it later means renaming.
+timezone = "America/Denver"
+
 # --- sources: one block per device dump root --------------------------------
 # layout selects the walk profile: "asiair" (Autorun|Plan/Light/<Target>/...,
-# flat Flat/ + Dark/ dumps, log/ folder) or "nina" (<YYYY-MM-DD>/LIGHT|FLAT|
-# DARK/... date folders).
+# flat Flat/ + Dark/ dumps, log/ folder), "nina" (<YYYY-MM-DD>/LIGHT|FLAT|
+# DARK/... date folders), or "dslr" (bare camera-card dumps: CR3/NEF/... raw
+# files with no metadata in their names — the night comes from each file's
+# mtime via [intake] timezone, and the meaning from the dump folder's name:
+# a folder named with calibration/dark/bias/flat tokens is a calibration
+# dump (reported, never staged); any other folder name is read as the
+# TARGET NAME and becomes a normal session. Example:
+#
+#   [[source]]
+#   id     = "r5card"
+#   label  = "Canon R5 card"
+#   path   = "/Volumes/…/Astro_imports/R5"
+#   layout = "dslr"
+#
+#   [[rig]]                    # raw names carry no camera token — key the
+#   source = "r5card"          # rig on the source with camera = "*"
+#   camera = "*"
+#   scope  = "Redcat51"
+#   sensor = "CanonR5"
+# )
 
 [[source]]
 id     = "air2600"

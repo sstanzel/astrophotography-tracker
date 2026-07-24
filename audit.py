@@ -24,6 +24,7 @@ Exit code: 1 if any error-severity finding, else 0.
 """
 
 import argparse
+import datetime
 import os
 import re
 import sqlite3
@@ -330,6 +331,67 @@ def check_all_rejected(cur: sqlite3.Cursor) -> list[Finding]:
     ]
 
 
+# The night-of convention: every frame captured between local noon on day D
+# and local noon on D+1 belongs to the session dated D — including a night
+# whose first light lands after midnight. Matches intake_scan.civil_night().
+# Frame stamps are device-local in both stamp families (ASIAir and NINA), so
+# no timezone conversion applies here.
+CIVIL_NOON_HOUR = 12
+
+
+def _light_civil_night(captured_at: str) -> datetime.date | None:
+    """The civil night one light frame belongs to, or None on a bad stamp."""
+    try:
+        ts = datetime.datetime.fromisoformat(captured_at)
+    except (TypeError, ValueError):
+        return None
+    if ts.hour < CIVIL_NOON_HOUR:
+        return ts.date() - datetime.timedelta(days=1)
+    return ts.date()
+
+
+def check_night_of_date(cur: sqlite3.Cursor) -> list[Finding]:
+    """Sessions dated by their morning instead of by night-of.
+
+    A session whose lights all start after midnight can end up hand-named
+    with the morning's date; intake (and its ±1-day dedupe probe) use the
+    night-of date, so each of these folders is a latent duplicate-import
+    trap. Flags any deep-sky session whose lights' modal civil night differs
+    from the folder date. Other-capture targets (daytime Moon/Sun, EAA) are
+    exempt — a morning capture before local noon is normal there, not a
+    misdated night.
+    """
+    nights: dict[str, dict] = {}  # folder_path -> {'date': str, 'counts': {night: n}}
+    for fp, sdate, captured in _rows(
+        cur,
+        """
+        SELECT s.folder_path, s.session_date, f.captured_at_utc
+        FROM frames f JOIN sessions s USING (session_id)
+        WHERE f.frame_type = 'light' AND NOT s.is_other_capture""",
+    ):
+        night = _light_civil_night(captured)
+        if night is None:
+            continue
+        entry = nights.setdefault(fp, {"date": sdate, "counts": {}})
+        entry["counts"][night] = entry["counts"].get(night, 0) + 1
+
+    findings: list[Finding] = []
+    for fp, entry in nights.items():
+        modal = max(entry["counts"], key=entry["counts"].get)
+        if modal.isoformat() != entry["date"]:
+            findings.append(
+                (
+                    "warning",
+                    "NIGHT_OF_DATE",
+                    fp,
+                    f"Folder is dated {entry['date']} but its lights belong to civil "
+                    f"night {modal} — the night-of convention names it {modal}; "
+                    f"intake would plan this night as {modal} and could re-import it.",
+                )
+            )
+    return findings
+
+
 def check_high_reject_rate(cur: sqlite3.Cursor) -> list[Finding]:
     """Sessions that lost at least half their lights to culling."""
     return [
@@ -487,6 +549,7 @@ DB_CHECKS = [
     check_temp_runaway,
     check_rotation_drift,
     check_all_rejected,
+    check_night_of_date,
     check_nested_cal_sets,
     check_flats_host_empty,
     check_mixed_exposure,

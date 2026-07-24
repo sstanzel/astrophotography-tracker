@@ -31,6 +31,13 @@ DEFAULT_CONFIG = os.path.join(TRACKER_DIR, "config.toml")
 
 VALID_ROLES = ("working", "archive")
 
+# The capture location's IANA timezone. Session dates follow the night-of
+# convention (frames between local noon on day D and local noon on D+1 belong
+# to the session dated D). Filename stamps are device-local and need no zone;
+# this matters only where a date must come from an mtime (dslr card dumps in
+# intake — override via [intake] timezone).
+DEFAULT_TIMEZONE = "America/Denver"
+
 
 def org_path(*parts):
     """Build a path inside the _organization folder.
