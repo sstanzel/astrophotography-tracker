@@ -223,6 +223,49 @@ def test_apply_unledgered_dest_collision_held(tmp_path, monkeypatch):
     assert collided.read_text() == "SOMEONE ELSES BYTES"  # untouched
 
 
+def test_vanished_staging_aggregates_attention_per_session(tmp_path, monkeypatch):
+    # Renamed/deleted staging is ONE event: the plan must hold every file but
+    # emit a single per-session attention line (plus the ledger reconciliation
+    # line), never one line per file.
+    import shutil as sh
+
+    cfg = make_env(tmp_path, monkeypatch)
+    scans = scan_all(cfg)
+    ctx = intake.decide(cfg, make_args(), scans)
+    intake.run_apply(cfg, make_args(), scans, ctx)
+    sh.move(str(tmp_path / "staging"), str(tmp_path / "staging-snapshot"))
+
+    ctx2 = intake.decide(cfg, make_args(apply=False), scans)
+
+    sess = next(s for s in ctx2["plan"]["sessions"] if s["status"] == "new")
+    held = [f for f in sess["files"] if f["decision"] == "hold"]
+    assert len(held) == 4  # every copied file (3 lights + 1 log) held
+    per_file = [a for a in ctx2["attention"] if "but the copy is gone" in a]
+    assert per_file == []
+    aggregated = [a for a in ctx2["attention"]
+                  if "4 previously-imported file(s) missing from staging" in a]
+    assert len(aggregated) == 1 and "--reimport" in aggregated[0]
+
+
+def test_reimport_aggregates_attention_per_session(tmp_path, monkeypatch):
+    import shutil as sh
+
+    cfg = make_env(tmp_path, monkeypatch)
+    scans = scan_all(cfg)
+    ctx = intake.decide(cfg, make_args(), scans)
+    intake.run_apply(cfg, make_args(), scans, ctx)
+    sh.rmtree(str(tmp_path / "staging"))
+
+    ctx2 = intake.decide(cfg, make_args(reimport=True), scans)
+
+    sess = next(s for s in ctx2["plan"]["sessions"] if s["status"] == "new")
+    assert all(f["decision"] == "copy" for f in sess["files"] if f["label"] == "lights")
+    per_file = [a for a in ctx2["attention"] if "previous copy vanished" in a]
+    assert per_file == []
+    assert any("re-importing" in a and "(--reimport)" in a
+               for a in ctx2["attention"])
+
+
 def test_apply_deleted_staged_copy_needs_reimport(tmp_path, monkeypatch):
     cfg = make_env(tmp_path, monkeypatch)
     scans = scan_all(cfg)
@@ -237,7 +280,10 @@ def test_apply_deleted_staged_copy_needs_reimport(tmp_path, monkeypatch):
     sess = next(s for s in ctx2["plan"]["sessions"] if s["status"] == "new")
     decisions = {os.path.basename(f["dest_rel"]): f["decision"] for f in sess["files"]}
     assert decisions[LIGHT.format(i=2)] == "hold"
-    assert any("neither staging nor" in line for line in ctx2["attention"])
+    assert any("previously-imported file(s) missing from staging" in line
+               for line in ctx2["attention"])
+    # the plan line covers it — no duplicate ledger-reconciliation line
+    assert not any("neither staging nor" in line for line in ctx2["attention"])
 
     ctx3 = intake.decide(cfg, make_args(reimport=True), scans)
     sess = next(s for s in ctx3["plan"]["sessions"] if s["status"] == "new")

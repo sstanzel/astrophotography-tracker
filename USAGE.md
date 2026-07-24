@@ -91,6 +91,26 @@ open-ended entry for the new reality. Historical nights keep resolving correctly
 forever. The plan names the rule behind every session (`open-ended rule` /
 `dated rule … → date`), so review catches a wrong bound before any copy.
 
+**The ledger and staging are one unit.** A ledger row means "a verified copy
+of this file exists" — in staging, or in the library once preflight files it.
+Rename, move, or delete staged sessions by hand and the next run **holds**
+every affected file (one attention line per session, never re-copying behind
+your back — it can't tell "moved on purpose" from "volume corrupted"). Three
+ways out, by intent:
+
+```bash
+# "I moved it — put it back":   rename/move the folder back; next run skips clean
+# "old copies are my backup":   python3 intake.py --apply --reimport   # stage fresh copies
+# "virgin test run" (TEST rig only): delete BOTH halves of the scratch state
+#   rm -rf <staging folder>  &&  rm _organization/dev/intake_test_ledger.db
+```
+
+The production ledger (`_organization/intake_ledger.db`) is never deleted —
+it IS the import history. Size is a non-issue at any horizon (one small row
+per imported file; years ≈ tens of MB). The thing that ages is the per-run
+reconciliation walk (a stat per ledger row); if plan runs ever feel slow
+(~100k+ rows), that's the cue to add row archiving — noted in BACKLOG.md.
+
 Safety model: a file is offered until a verified copy of it exists (ledger row
 ⇔ hash-verified copy); collisions are never overwritten (`held` + attention);
 an interrupted run self-heals (`.part` leftovers cleaned, unledgered files

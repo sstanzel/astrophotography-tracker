@@ -652,6 +652,7 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
             )
     known_by_source = {sid: intake_ledger.known_files(con, sid) for sid in scans}
 
+    gone_sessions: set[str] = set()  # already carry a missing-from-staging line
     for sess in plan["sessions"]:
         sess["files"] = []
         sess["status_note"] = ""
@@ -679,6 +680,10 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
 
         sess["status"] = "new"
         known = known_by_source[sess["source"]]
+        # Vanished-copy notes aggregate to ONE attention line per session:
+        # a renamed/deleted staging folder is one event, not N file problems,
+        # and per-file lines would drown the --reimport guidance in pages.
+        gone_held = gone_reimport = 0
         for label, records, dest_sub in _session_groups(sess):
             for rec in records:
                 dest_rel = f"{sess['name']}/{dest_sub}/{os.path.basename(rec['relpath'])}"
@@ -693,9 +698,11 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
                         decision, note = "skip", "filed"
                     elif args.reimport:
                         note = "reimport — previous copy vanished"
+                        gone_reimport += 1
                     else:
                         decision = "hold"
                         note = "previously imported (run %d) but the copy is gone" % row["run_id"]
+                        gone_held += 1
                 elif row:
                     if os.path.exists(dest_abs):
                         decision, note = "hold", "changed at source AND destination occupied"
@@ -704,7 +711,9 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
                 elif os.path.exists(dest_abs):
                     decision = "hold"
                     note = "destination exists but is not in the ledger — never overwritten"
-                if note and decision != "skip":
+                if note and decision != "skip" and not note.startswith(
+                    ("previously imported", "reimport —")
+                ):
                     attention.append(f"{sess['name']}: {os.path.basename(rec['relpath'])} — {note}")
                 sess["files"].append(
                     {
@@ -715,6 +724,17 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
                         "note": note,
                     }
                 )
+
+        if gone_held:
+            gone_sessions.add(sess["name"])
+            attention.append(
+                f"{sess['name']}: {gone_held} previously-imported file(s) missing from "
+                f"staging — held; re-offer with --reimport"
+            )
+        if gone_reimport:
+            attention.append(
+                f"{sess['name']}: re-importing {gone_reimport} vanished file(s) (--reimport)"
+            )
 
         # Twin guard: another session for the same DESTINATION FOLDER + night
         # (matching adjacentness) means this night is already in the library
@@ -751,6 +771,8 @@ def decide(cfg: dict, args, scans: dict[str, dict]) -> dict:
             continue
         missing_by_session[row["session"]] = missing_by_session.get(row["session"], 0) + 1
     for session_name, n in sorted(missing_by_session.items()):
+        if session_name in gone_sessions:
+            continue  # the plan already reports this session's missing copies
         attention.append(
             f"ledger: {n} file(s) imported into {session_name!r} are in neither staging nor "
             f"the library — deleted by hand? re-offer with --reimport"

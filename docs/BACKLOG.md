@@ -10,6 +10,40 @@ and enough of the design sketch to resume cold.
 
 ---
 
+## Intake: other capture types from Astro_imports (solar / planetary / lucky imaging)
+
+**Status:** idea · 2026-07-24
+
+Intake currently understands two layouts (asiair, nina) and stages deep-sky
+sessions only. The import area also receives — or will — solar and planetary
+captures from **ASICap, FireCapture, and SharpCap**. Questions to answer
+before building: each program's folder/naming grammar; video formats (SER/AVI
+lucky-imaging runs are one big file, not frame sets — hashing and dedupe
+semantics differ); targets are Sun/Moon/planets (other-capture buckets, not
+the deep-sky target registry — how do they map to `So_Solar…`-style library
+folders?); rigs often differ (barlows, solar filters, cameras shared with the
+guide fleet). Likely shape: per-program `layout =` values in [[source]] plus
+an other-capture staging path, reported in their own plan section. Survey the
+actual Astro_imports contents first — inventory what the programs really
+write before designing.
+
+## Intake ledger: reconciliation vs culled frames + row archiving
+
+**Status:** noted · 2026-07-24
+
+Two aging concerns for the production ledger, neither urgent:
+(1) **Culling breaks filed-path resolution** — reconciliation resolves a
+filed row at `<library session>/Light/<name>`; once a frame is culled to
+`Rejected/` that exact path is gone and the row would raise a false
+"neither staging nor the library" line. Fix when it first bites: also check
+`<session>/Rejected/<name>` (and sweep-deleted scratch never enters the
+ledger, so only culling matters).
+(2) **Reconciliation cost grows linearly** — one stat per ledger row per
+plan run, against the library (often NAS) once sessions are filed. Fine for
+years at Steve's volume (~tens of k rows); if plan runs slow past ~100k
+rows, add an `archived` flag set after N consecutive verified passes and
+skip archived rows in the walk (--audit still checks everything).
+
 ## Mono flat days: filter-aware flats + bidirectional nearest (minicam8)
 
 **Status:** designed · 2026-07-24
