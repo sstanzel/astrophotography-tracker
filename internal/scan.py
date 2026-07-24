@@ -1342,6 +1342,11 @@ def ingest_library(con, library_id, root, obs, locations, log):
                     continue
                 kind = frame_kind(m)  # light/flat/dark/bias/darkflat
                 ftype = "dark_flat" if kind == "darkflat" else kind
+                # ASIAir and NINA both NAME dark-flats "Dark_*"/"DARK_*" — the
+                # placement convention (the session's "Flat …/Dark Flat/"
+                # folder) is what actually identifies them.
+                if ftype == "dark" and f"{os.sep}Dark Flat{os.sep}" in abs_path:
+                    ftype = "dark_flat"
                 unit = (safe(m, "unit", "s") or "s").lower()
                 exp_value = float(m.group("exp"))
                 exp_s = exp_value if unit == "s" else exp_value / 1000.0

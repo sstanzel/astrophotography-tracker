@@ -119,7 +119,6 @@ def main():
     # L FlatsSource M FlatsLocation N DarkFlats O Darks P Bias Q BiasSource
     # R BiasLocation S Integration then stages/URL/FolderPath
     s_headers = [
-        "Library",
         "Target ID",
         "Catalog",
         "Name",
@@ -147,6 +146,9 @@ def main():
         "Publish",
         "Print",
         "AstroBin URL",
+        # Library rides with the path (filterable, but it's provenance detail,
+        # not the first thing you look at — moved from column A 2026-07-23).
+        "Library",
         "Folder Path",
     ]
 
@@ -173,7 +175,6 @@ def main():
         year = int(r["session_date"][:4]) if r["session_date"] else None
         s_rows.append(
             [
-                r["library_id"],
                 r["target_id"],
                 r["catalog"],
                 r["common_name"],
@@ -201,16 +202,27 @@ def main():
                 stage_text(r["stage_publish"]),
                 stage_text(r["stage_print"]),
                 r["astrobin_url"] or "",
+                r["library_id"],
                 r["folder_path"],
             ]
         )
-    write_sheet(ws, s_headers, s_rows, col_formats={8: "0", 19: "0.00"})
+    write_sheet(
+        ws,
+        s_headers,
+        s_rows,
+        col_formats={
+            s_headers.index("Year") + 1: "0",
+            s_headers.index("Integration (hours)") + 1: "0.00",
+        },
+    )
     n = len(s_rows)
-    # totals row with SUM formulas (bounded to data rows 2..n+1)
+    # totals row with SUM formulas (bounded to data rows 2..n+1); columns are
+    # found by header name, never by number (STYLE.md headline-metrics rule).
     tr = n + 2
     ws.cell(row=tr, column=1, value="TOTAL").font = BOLD_FONT
-    # Lights..Integration (skip the Flats/Bias Source + Location text columns)
-    for col in (9, 10, 11, 14, 15, 16, 19):
+    for name in ("Lights", "Rejected", "Flats", "Dark Flats", "Darks", "Bias",
+                 "Integration (hours)"):
+        col = s_headers.index(name) + 1
         L = get_column_letter(col)
         c = ws.cell(row=tr, column=col, value=f"=SUM({L}2:{L}{n+1})")
         c.font = BOLD_FONT
