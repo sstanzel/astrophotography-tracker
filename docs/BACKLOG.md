@@ -158,6 +158,59 @@ Run phase (later): filename grammars + device layout profiles fully config-
 driven (new capture software = config edit, not a fits_parser change);
 dashboard "last import" tile from the ledger `runs` table.
 
+## Mosaics: panels as a target-token suffix family (like _adjacent)
+
+**Status:** designed · 2026-07-23 (no mosaic captured yet; build when one is planned)
+
+Research: NINA's Framing Assistant appends **"Panel X"** to the target name, so
+panel identity lands in every frame filename via the existing NINA v2 grammar
+(confirmed in NINA docs). ASIAir mosaic mode runs each panel as its own
+Plan-mode target; its exact suffix is undocumented — the first real ASIAir
+mosaic surfaces it via TARGET_MISMATCH/quarantine (never guessed), and the
+suffix family grows then. Astro-mosaic practice: panels are independent
+pointings imaged across nights to COMPARABLE DEPTH (even signal at the seams
+is the quality driver), 10–20% overlap, each panel integrated separately into
+its own master, and the mosaic assembled from panel MASTERS (PhotometricMosaic
+/ GradientMergeMosaic), not pooled raw frames. Hierarchy: field → panels →
+sessions → frames.
+
+Design — follow the frames, no new hierarchy:
+
+1. **One target folder per mosaic field**, registry as usual. A mosaic is a
+   property of how the field is shot, not a new kind of folder.
+2. **Session names follow the frames**, panel suffix included:
+   `SH2_240_Panel_2 Pleiades111 ASI2600MCAir 2026-11-14` under the field's
+   folder. Frame files are never renamed (standing rule).
+3. **A recognized panel-suffix family**, exactly like ADJACENT_SUFFIX:
+   `_Panel_<n>` (NINA) + the ASIAir form when observed. Consumed at existing
+   seams only: `target_base()` strips it (preflight resolution +
+   TARGET_MISMATCH quiet); the twin guard treats different panels sharing a
+   folder+night as legitimate (same panel id under two names still flags);
+   intake needs ZERO changes (distinct tokens already make distinct sessions;
+   shared flats attach per the sibling convention).
+4. **Per-panel stacking = the existing living integration**, one per panel:
+   `[membership]` gains optional `panel = <n>` (rig + span as today). Built /
+   available / stale / goal machinery works per panel unchanged.
+5. **Assembly = new integration `kind = "mosaic"`** whose members are the
+   PANEL INTEGRATIONS (their masters) — the one new mechanism
+   (integration-of-integrations). Complete when every panel built; stale when
+   any panel stale; data_through = oldest panel's. Hours never re-counted
+   (panel sessions already count toward the target). Kinds today derive as
+   multi-session/composite at internal/scan.py ~1935; `mosaic` joins as a
+   declared kind with member-integration resolution.
+6. **Dashboard: panel balance** — the payoff feature: per-panel kept-hours
+   table with min–max spread, and Capture-more saying "Panel 3 is 2.1 h
+   behind". Panel goal defaults to target goal ÷ panel count; explicit
+   overrides only if needed later.
+
+Deliberately NOT designed in: per-panel registry entries, a panel subfolder
+level, coordinate awareness, synonym lists, an "is a mosaic" flag — the panel
+tokens in the frames are the entire signal.
+
+Phases: (1) first mosaic planned → suffix family + target_base + twin guard;
+(2) first stacking → membership panel filter + panel-balance table;
+(3) first assembly → kind="mosaic".
+
 ## Open design questions (paper §11)
 
 **Status:** ideas, undecided · as of rev-2 paper 2026-07-10
@@ -166,7 +219,9 @@ Tracked in the paper; listed here so the backlog is one-stop:
 
 - ~~Per-session flats vs a shared-by-date flat library.~~ **Decided 2026-07-12:
   per-session** — see the flats-with-sessions entry in Done.
-- Field-name target folders (e.g. widefield mosaics) vs per-member linking.
+- ~~Field-name target folders (e.g. widefield mosaics) vs per-member linking.~~
+  **Designed 2026-07-23: one field folder + panel-suffix sessions** — see the
+  Mosaics entry above.
 - Whether to add temp/gain to session folder names.
 - AstroBin vs print: one pipeline stage or two (currently two: Published, Printed).
 - Session naming by civil vs astronomical (noon-to-noon) date.
