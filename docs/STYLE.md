@@ -106,3 +106,15 @@ The same spirit extends to prose deliverables generated from this repo
 - The `.docx` is generated output. Hand edits are welcome as review, but they
   must be backported into `build_paper.js` — and the principle behind each
   edit applied across the whole document — or the next regeneration loses them.
+
+## Headline metrics (added 2026-07-23)
+
+The metrics that appear on BOTH the dashboard's KPI cards and the
+spreadsheet's Summary sheet are defined ONCE, in `internal/metrics.py`
+(`summary_metrics()`): same labels, same order, same numbers — the two faces
+must be in exact lockstep, never merely similar. Adding or renaming a
+headline metric happens there and nowhere else. The Summary sheet writes
+VALUES, not formulas (hardcoded column letters broke silently when the
+Sessions sheet gained columns); detail sheets may use formulas, but any
+cross-sheet reference computes its column letter from the header list
+(`s_col()` in export_xlsx.py) — never a literal letter.

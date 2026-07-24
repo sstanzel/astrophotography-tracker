@@ -16,6 +16,9 @@ Usage:
 
 import os, sys, sqlite3, argparse, json, datetime
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from metrics import summary_metrics  # noqa: E402
+
 
 def main():
     # tracker.db + the generated dashboard live at the tracker root, one up.
@@ -51,40 +54,14 @@ def main():
         is not None
     )
 
+    # Headline metrics come from internal/metrics.py — the ONE definition
+    # shared with the spreadsheet's Summary sheet, so the two faces can never
+    # disagree on a label or a number.
+    kpis = summary_metrics(con)
+
     data = {
         "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "kpis": {
-            "hours": scalar(
-                "SELECT ROUND(SUM(integration_s)/3600.0) FROM sessions WHERE NOT is_other_capture"
-            ),
-            "deepSkySessions": scalar("SELECT COUNT(*) FROM sessions WHERE NOT is_other_capture"),
-            "otherSessions": scalar("SELECT COUNT(*) FROM sessions WHERE is_other_capture"),
-            "targetsImaged": scalar(
-                "SELECT COUNT(DISTINCT target_id) FROM sessions WHERE lights_kept>0 AND NOT is_other_capture"
-            ),
-            "keptLights": scalar(
-                "SELECT COUNT(*) FROM frames WHERE frame_type='light' AND NOT is_rejected"
-            ),
-            "calSets": scalar("SELECT COUNT(*) FROM calibration_masters"),
-            "calNeeds": scalar("""SELECT COUNT(*) FROM v_calibration_needs
-                                  WHERE status IN ('no master','stale (new raw)','stale (age)')
-                                    AND (class='dark' OR (class='bias' AND (SELECT require_bias
-                                         FROM coverage_settings WHERE id=1)=1))"""),
-            "integrations": (
-                scalar("SELECT COUNT(*) FROM integrations") if has_integrations else 0
-            ),
-            "unpublishedTargets": (
-                scalar("SELECT COUNT(*) FROM v_targets_unpublished") if has_integrations else 0
-            ),
-            "validationIssues": (
-                scalar(
-                    "SELECT COUNT(*) FROM validation_findings "
-                    "WHERE severity IN ('error','warning')"
-                )
-                if has_validation
-                else 0
-            ),
-        },
+        "kpis": [{"label": m["label"], "value": m["value"], "warn": m["warn"]} for m in kpis],
         "byYear": rows("""SELECT substr(session_date,1,4) AS year, COUNT(*) AS sessions,
                                  ROUND(SUM(integration_s)/3600.0) AS hours
                           FROM sessions WHERE NOT is_other_capture
@@ -355,9 +332,10 @@ def main():
     with open(args.out, "w") as f:
         f.write(html)
     print(f"Wrote {args.out}")
+    by_label = {m["label"]: m["value"] for m in kpis}
     print(
-        f"  {data['kpis']['deepSkySessions']} sessions · "
-        f"{data['kpis']['hours']} hours · {len(data['sessions'])} session rows"
+        f"  {by_label['Deep-sky sessions']} sessions · "
+        f"{by_label['Deep-sky hours']} hours · {len(data['sessions'])} session rows"
     )
 
 
@@ -530,22 +508,12 @@ function fmtHM(v){ if(v==null) return "";
 function fmtExp(v){ return v==null ? "" : (v%1===0 ? String(Math.round(v)) : String(v)); }
 
 // ---- KPI cards ----
-const kpiDefs = [
-  ["hours","Deep-sky hours",false],
-  ["deepSkySessions","Deep-sky sessions",false],
-  ["targetsImaged","Targets imaged",false],
-  ["keptLights","Kept light frames",false],
-  ["otherSessions","Other-capture sessions",false],
-  ["calSets","Calibration sets",false],
-  ["calNeeds","Calibration needs attention",true],
-  ["integrations","Multi-session integrations",false],
-  ["unpublishedTargets","Targets not published",true],
-  ["validationIssues","Validation issues",true],
-];
-document.getElementById("kpis").innerHTML = kpiDefs.map(([k,l,warn])=>
-  `<div class="kpi${warn && D.kpis[k]>0?' warn':''}">
-     <div class="v">${typeof D.kpis[k]==='number'?D.kpis[k].toLocaleString():D.kpis[k]}</div>
-     <div class="l">${l}</div></div>`).join("");
+// Labels + values arrive pre-built from internal/metrics.py — the one
+// definition shared with the spreadsheet's Summary sheet.
+document.getElementById("kpis").innerHTML = D.kpis.map(m=>
+  `<div class="kpi${m.warn && m.value>0?' warn':''}">
+     <div class="v">${typeof m.value==='number'?m.value.toLocaleString():m.value}</div>
+     <div class="l">${m.label}</div></div>`).join("");
 
 // ---- data health ----
 (function(){

@@ -17,6 +17,9 @@ Re-run refresh.py to update the workbook.
 """
 
 import os, sys, sqlite3, argparse, datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from metrics import summary_metrics  # noqa: E402
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -146,6 +149,13 @@ def main():
         "AstroBin URL",
         "Folder Path",
     ]
+
+    def s_col(name):
+        """Column letter of a Sessions-sheet header. Cross-sheet formulas must
+        never hardcode letters — the 2026-07-12 Flats/Bias column additions
+        silently pointed the old $O/$S formulas at Darks/hours for two weeks."""
+        return get_column_letter(s_headers.index(name) + 1)
+
     s_rows = []
     for r in cur.execute("""
         SELECT s.library_id, s.target_id, t.catalog, t.common_name, s.scope, s.sensor,
@@ -295,12 +305,20 @@ def main():
             1: tid,
             2: r["catalog"],
             3: r["common_name"],
-            4: f"=COUNTIF(Sessions!$B:$B,$A{row})",
-            5: f"=SUMIF(Sessions!$B:$B,$A{row},Sessions!$O:$O)",
-            6: f"=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2024)",
-            7: f"=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2025)",
-            8: f"=SUMIFS(Sessions!$O:$O,Sessions!$B:$B,$A{row},Sessions!$H:$H,2026)",
-            9: f"=SUMIF(Sessions!$B:$B,$A{row},Sessions!$I:$I)",
+            4: f"=COUNTIF(Sessions!${s_col('Target ID')}:${s_col('Target ID')},$A{row})",
+            5: f"=SUMIF(Sessions!${s_col('Target ID')}:${s_col('Target ID')},$A{row},"
+               f"Sessions!${s_col('Integration (hours)')}:${s_col('Integration (hours)')})",
+            6: f"=SUMIFS(Sessions!${s_col('Integration (hours)')}:${s_col('Integration (hours)')},"
+               f"Sessions!${s_col('Target ID')}:${s_col('Target ID')},$A{row},"
+               f"Sessions!${s_col('Year')}:${s_col('Year')},2024)",
+            7: f"=SUMIFS(Sessions!${s_col('Integration (hours)')}:${s_col('Integration (hours)')},"
+               f"Sessions!${s_col('Target ID')}:${s_col('Target ID')},$A{row},"
+               f"Sessions!${s_col('Year')}:${s_col('Year')},2025)",
+            8: f"=SUMIFS(Sessions!${s_col('Integration (hours)')}:${s_col('Integration (hours)')},"
+               f"Sessions!${s_col('Target ID')}:${s_col('Target ID')},$A{row},"
+               f"Sessions!${s_col('Year')}:${s_col('Year')},2026)",
+            9: f"=SUMIF(Sessions!${s_col('Target ID')}:${s_col('Target ID')},$A{row},"
+               f"Sessions!${s_col('Lights')}:${s_col('Lights')})",
             10: r["scopes"] or "",
             11: r["first_s"] or "",
             12: r["last_s"] or "",
@@ -529,7 +547,6 @@ def main():
             ORDER BY CASE vf.severity WHEN 'error' THEN 0
                      WHEN 'warning' THEN 1 ELSE 2 END, vf.code"""):
             v_rows.append([r["severity"], r["code"], r["scope"], r["location"], r["message"]])
-    n_findings = sum(1 for r in v_rows if r[0] in ("error", "warning"))
     wv = wb.create_sheet("Data Health")
     write_sheet(
         wv,
@@ -548,32 +565,17 @@ def main():
     wsum["A1"].font = TITLE_FONT
     wsum["A2"] = f"Generated {datetime.datetime.now():%Y-%m-%d %H:%M} from tracker.db"
     wsum["A2"].font = Font(name=FONT, italic=True, size=9, color="888888")
-    metrics = [
-        (
-            "Deep-sky integration (hours)",
-            f'=SUMIFS(Sessions!$O$2:$O${n+1},Sessions!$S$2:$S${n+1},"No")',
-            "0",
-        ),
-        ("Deep-sky sessions", f'=COUNTIF(Sessions!$S$2:$S${n+1},"No")', "0"),
-        ("Other-capture sessions", f'=COUNTIF(Sessions!$S$2:$S${n+1},"Yes")', "0"),
-        ("Kept light frames", f"=SUM(Sessions!$I$2:$I${n+1})", "#,##0"),
-        ("Rejected light frames", f"=SUM(Sessions!$J$2:$J${n+1})", "#,##0"),
-        ("Distinct targets", f"=COUNTA(Targets!$A$2:$A${len(t_rows)+1})", "0"),
-        ("Calibration sets tracked", f"=COUNTA(Calibration!$A$2:$A${len(c_rows)+1})", "0"),
-        (
-            "Calibration items needing attention",
-            '=COUNTIF(Calibration!$J:$J,"no master")+COUNTIF(Calibration!$J:$J,"stale (new raw)")+COUNTIF(Calibration!$J:$J,"stale (age)")',
-            "0",
-        ),
-        ("Multi-session integrations", n_integ, "0"),
-        ("Validation findings (error + warning)", n_findings, "0"),
-    ]
+    # Headline metrics come from internal/metrics.py — the ONE definition
+    # shared with the dashboard's KPI cards: same labels, same order, same
+    # numbers, written as values (formulas against sheet columns broke
+    # silently when the Sessions layout gained the Flats/Bias columns —
+    # never again; the sheets carry the detail, the Summary carries the DB).
     row = 4
-    for label, formula, fmt in metrics:
-        wsum.cell(row=row, column=1, value=label).font = BOLD_FONT
-        c = wsum.cell(row=row, column=2, value=formula)
+    for m in summary_metrics(con):
+        wsum.cell(row=row, column=1, value=m["label"]).font = BOLD_FONT
+        c = wsum.cell(row=row, column=2, value=m["value"])
         c.font = CELL_FONT
-        c.number_format = fmt
+        c.number_format = m["fmt"]
         c.fill = PatternFill("solid", start_color=BAND_BG)
         row += 1
     wsum.column_dimensions["A"].width = 36
@@ -597,7 +599,7 @@ def main():
     con.close()
     print(f"Wrote {args.out}")
     print(
-        f"  Sessions: {n} · Targets: {len(t_rows)} · Calibration: {len(c_rows)} "
+        f"  Sessions: {n} · Targets: {len(t_rows)} · Calibration needs rows: {len(c_rows)} "
         f"· Integrations: {n_integ} · Health findings: {len(v_rows)}"
     )
 
