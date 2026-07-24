@@ -1021,16 +1021,25 @@ def _clean_stale_parts(staging: str) -> int:
 
 
 def stamp_session(staging: str, session_name: str, settings: dict) -> list[str]:
-    """Stamp notes.toml and the .pxiproject template into a new session.
+    """Stamp the session skeleton into a new staged session.
 
-    Both stamps are skip-if-present (idempotent resume) and the pxiproject is
-    copied opaquely — its internals are the user's to maintain, never edited.
+    Reproduces everything PostHaste stamps into a hand-created session: the
+    notes.toml + .pxiproject templates plus the four empty working folders
+    ('{name} Results', 'PI Magic', 'PI Process', 'Rejected'). Every stamp is
+    skip-if-present (idempotent resume) and the pxiproject is copied opaquely
+    — its internals are the user's to maintain, never edited.
 
     Returns:
         Action-log lines for what was actually stamped.
     """
     lines: list[str] = []
     sdir = os.path.join(staging, session_name)
+
+    for folder in (f"{session_name} Results", "PI Magic", "PI Process", "Rejected"):
+        fdir = os.path.join(sdir, folder)
+        if not os.path.isdir(fdir):
+            os.makedirs(fdir)
+            lines.append(f"stamp '{fdir}{os.sep}'")
 
     notes_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "notes.toml")
     notes_dest = os.path.join(sdir, f"{session_name} notes.toml")

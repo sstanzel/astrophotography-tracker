@@ -156,6 +156,40 @@ def test_apply_creates_session_stamps_and_ledgers(tmp_path, monkeypatch):
     assert all(r["sha"] for r in rows)
 
 
+def test_stamp_session_creates_full_posthaste_skeleton(tmp_path, monkeypatch):
+    # A staged session must match a hand-created (PostHaste) one: the two
+    # template stamps PLUS the four empty working folders.
+    cfg = make_env(tmp_path, monkeypatch)
+    scans = scan_all(cfg)
+    ctx = intake.decide(cfg, make_args(), scans)
+    intake.run_apply(cfg, make_args(), scans, ctx)
+
+    name = "M_5 RASA8 ASI2600MCAir 2026-07-08"
+    sdir = tmp_path / "staging" / name
+    for folder in (f"{name} Results", "PI Magic", "PI Process", "Rejected"):
+        assert (sdir / folder).is_dir(), f"missing skeleton folder: {folder}"
+        assert os.listdir(sdir / folder) == []  # stamped empty, never populated
+
+
+def test_stamp_session_idempotent_preserves_working_files(tmp_path):
+    # Re-stamping an existing session (interrupted-run resume) must not touch
+    # what's already there — including files inside the working folders.
+    staging = tmp_path / "staging"
+    name = "M_5 RASA8 ASI2600MCAir 2026-07-08"
+    keeper = staging / name / f"{name} Results" / "master.xisf"
+    write_file(str(keeper), "precious")
+    settings = {"pxiproject_template": ""}
+
+    lines = intake.stamp_session(str(staging), name, settings)
+    relined = intake.stamp_session(str(staging), name, settings)
+
+    assert keeper.read_text() == "precious"
+    assert any("PI Magic" in ln for ln in lines)  # first pass stamped the rest
+    assert not any("Results" in ln for ln in lines)  # pre-existing dir not re-stamped
+    assert not any("PI Magic" in ln or "PI Process" in ln or "Rejected" in ln
+                   for ln in relined)  # second pass stamps no folders
+
+
 def test_apply_rerun_skips_everything(tmp_path, monkeypatch):
     cfg = make_env(tmp_path, monkeypatch)
     scans = scan_all(cfg)
