@@ -670,6 +670,82 @@ def stamp_capture(text, stats):
 
 
 # =============================================================================
+# Processing method  (tracker.db -> [processing] integration_method — the
+# durable Method record that survives sweep.py and full DB rebuilds)
+# =============================================================================
+def load_methods(db_path):
+    """Read each session's detected integration method from tracker.db.
+
+    Returns:
+        Dict of session folder name -> method string ('PixInsight'|'PI Magic'|
+        'other'). Sessions with no detected method are omitted.
+    """
+    if not os.path.isfile(db_path):
+        return {}
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT folder_path, integration_method FROM sessions"
+            " WHERE integration_method IS NOT NULL"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        con.close()
+    return {os.path.basename(fp): m for fp, m in rows if m}
+
+
+def stamp_method(text, method):
+    """Write [processing] integration_method (tracker-owned, like [capture]).
+
+    Only ever writes a known method — never removes or blanks one, so the
+    stamp survives after sweep.py clears the working folders the detection
+    reads from.
+
+    Args:
+        text: current notes.toml content.
+        method: detected method string (caller skips None).
+
+    Returns:
+        (new_text, changed list) like the other stamps.
+    """
+    lines = text.splitlines(keepends=True)
+    start = end = None
+    section = None
+    for idx, line in enumerate(lines):
+        sm = re.match(r"\s*\[(\w+)\]", line)
+        if not sm:
+            continue
+        if section == "processing":
+            end = idx
+            break
+        section = sm.group(1)
+        if section == "processing":
+            start = idx
+    label = f'processing.integration_method="{method}"'
+    if start is None:
+        block = ["\n", "[processing]\n", f'integration_method = "{method}"\n']
+        return "".join(lines) + "".join(block), [label]
+    if end is None:
+        end = len(lines)
+    for idx in range(start + 1, end):
+        fm = re.match(r'(\s*)(integration_method)(\s*=\s*)"([^"]*)"(.*?)(\r?\n?)$', lines[idx])
+        if not fm:
+            continue
+        if fm.group(4) == method:
+            return text, []
+        lines[idx] = fm.group(1) + fm.group(2) + fm.group(3) + f'"{method}"' + fm.group(5) + fm.group(6)
+        return "".join(lines), [label]
+    insert_at = end
+    while insert_at > start + 1 and lines[insert_at - 1].strip() == "":
+        insert_at -= 1
+    lines.insert(insert_at, f'integration_method = "{method}"\n')
+    return "".join(lines), [label]
+
+
+# =============================================================================
 # Robust write  (network volumes occasionally reject a plain truncate-write)
 # =============================================================================
 def safe_write(path, text):
@@ -730,6 +806,9 @@ def main():
     capture_stats = load_capture_stats(args.db)
     if capture_stats:
         print(f"Loaded capture stats for {len(capture_stats)} sessions from tracker.db")
+    methods = load_methods(args.db)
+    if methods:
+        print(f"Loaded integration methods for {len(methods)} sessions from tracker.db")
 
     notes = []
     for lib in astro_config.load_libraries(args.config):
@@ -746,7 +825,8 @@ def main():
         notes = [n for n in notes if args.only in n]
     print(f"Found {len(notes)} session notes.toml to process\n")
 
-    n_sky = n_weather = n_cal = n_capture = n_skipped_weather = n_loc_unknown = n_offdate = 0
+    n_sky = n_weather = n_cal = n_capture = n_method = 0
+    n_skipped_weather = n_loc_unknown = n_offdate = 0
     n_have_weather = 0  # already filled — API skipped
     n_write_fail = 0
     write_failed = []
@@ -817,6 +897,10 @@ def main():
         if cap:
             new_text, cap_changed = stamp_capture(new_text, cap)
             filled += cap_changed
+        method = methods.get(session)
+        if method:
+            new_text, m_changed = stamp_method(new_text, method)
+            filled += m_changed
 
         if filled and not args.dry_run:
             if not safe_write(path, new_text):
@@ -835,6 +919,8 @@ def main():
             n_cal += 1
         if any(f.startswith("capture.") for f in filled):
             n_capture += 1
+        if any(f.startswith("processing.") for f in filled):
+            n_method += 1
 
         tag = "DRY " if args.dry_run else ""
         src = {
@@ -863,6 +949,7 @@ def main():
     print(f"  sessions with weather fields filled: {n_weather}")
     print(f"  sessions with calibration matches stamped: {n_cal}")
     print(f"  sessions with capture record stamped: {n_capture}")
+    print(f"  sessions with integration method stamped: {n_method}")
     if n_have_weather:
         print(f"  sessions already had weather (skipped API): {n_have_weather}")
     if n_skipped_weather:

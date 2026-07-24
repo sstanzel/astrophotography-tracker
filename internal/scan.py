@@ -246,6 +246,7 @@ def read_notes_toml(session_path, session_name):
         edited=False,
         culled=False,
         target_mismatch_ok=False,
+        integration_method=None,
         flats_with=None,
         bias_set=None,
         published=[],
@@ -274,6 +275,11 @@ def read_notes_toml(session_path, session_name):
     m = re.search(r"^moon_illumination\s*=\s*([0-9.]+)", txt, re.M)
     if m:
         out["moon_illumination"] = float(m.group(1))
+    # Tracker-owned stamp (populate_notes) — the durable Method record that
+    # survives sweep.py clearing the working folders and full DB rebuilds.
+    m = re.search(r'^\s*integration_method\s*=\s*"([^"]+)"', txt, re.M)
+    if m:
+        out["integration_method"] = m.group(1)
     m = re.search(r"^moon_age_days\s*=\s*([0-9.]+)", txt, re.M)
     if m:
         out["moon_age_days"] = float(m.group(1))
@@ -1313,6 +1319,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                                  WHERE target_id=? AND scope=? AND sensor=? AND session_date=?""",
                 (tp["target_id"], scope, sensor, sdate),
             ).fetchone()[0]
+            obs["seen_session_ids"].add(sid)
             n_sessions += 1
 
             # Re-ingest frames: delete then re-insert so counts stay exact.
@@ -1479,7 +1486,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                   bias_note_ref=?,
                   integration_method = CASE
                       WHEN ? IN ('PixInsight','PI Magic') THEN ?
-                      ELSE COALESCE(integration_method, ?) END,
+                      ELSE COALESCE(integration_method, ?, ?) END,
                   updated_at=CURRENT_TIMESTAMP
                 WHERE session_id=?
             """,
@@ -1517,6 +1524,7 @@ def ingest_library(con, library_id, root, obs, locations, log):
                     method,
                     method,
                     method,
+                    notes["integration_method"],
                     sid,
                 ),
             )
@@ -1950,6 +1958,7 @@ def ingest_integrations(con, library_id, root, obs, log):
 
             sessions_available = sum(1 for s in member_rows.values() if s in avail_set)
             method = detect_method(ipath)  # PixInsight|PI Magic|other|None
+            obs["seen_integration_paths"].add(rel)
             cur.execute(
                 """
                 INSERT INTO integrations(target_id, library_id, kind, folder_name,
@@ -2228,6 +2237,70 @@ def validate(con, locations, obs, log):
             "naming grammar — it was not ingested as a session.",
         )
 
+    # Rows whose folders vanished. Only decidable when the row's OWN library
+    # was walked this pass and NO walked library re-claimed it (the session
+    # natural key is library-agnostic, so cross-library moves re-point rows
+    # silently). Never auto-deleted: this state cannot distinguish "deleted
+    # on purpose" from "moved to a configured-but-offline library" — it
+    # self-heals when that library is next mounted; a real deletion is
+    # acknowledged with forget.py.
+    scanned = obs.get("scanned_library_ids", [])
+    seen_sids = obs.get("seen_session_ids", set())
+    if scanned:
+        marks = ",".join("?" * len(scanned))
+        for sid, fp, kept, rej, scope, sensor, sdate in cur.execute(
+            f"SELECT session_id, folder_path, lights_kept, lights_rejected,"
+            f"       scope, sensor, session_date"
+            f"  FROM sessions WHERE library_id IN ({marks})",
+            scanned,
+        ).fetchall():
+            if sid in seen_sids:
+                continue
+            sname = os.path.basename(fp)
+            successor = cur.execute(
+                "SELECT folder_path FROM sessions WHERE scope=? AND sensor=?"
+                "  AND session_date=? AND session_id!=? AND lights_kept+lights_rejected=?",
+                (scope, sensor, sdate, sid, (kept or 0) + (rej or 0)),
+            ).fetchone()
+            hint = (
+                f" A same-rig/night/frame-count session exists at "
+                f"'{successor[0]}' — if this was a rename or re-target, that is "
+                f"the successor."
+                if successor
+                else ""
+            )
+            add(
+                "warning",
+                "SESSION_MISSING",
+                "session",
+                sid,
+                fp,
+                f"Folder no longer exists and no scanned library claims this "
+                f"session ({(kept or 0)} kept / {(rej or 0)} rejected lights "
+                f"still counted in totals).{hint} If it moved to an offline "
+                f"library, this clears when that library is next scanned. If "
+                f"it was deleted on purpose: python3 forget.py \"{sname}\"",
+            )
+        seen_paths = obs.get("seen_integration_paths", set())
+        for ipath, iname in cur.execute(
+            f"SELECT folder_path, folder_name FROM integrations "
+            f"WHERE library_id IN ({marks})",
+            scanned,
+        ).fetchall():
+            if ipath in seen_paths:
+                continue
+            add(
+                "warning",
+                "INTEGRATION_MISSING",
+                "integration",
+                None,
+                ipath,
+                f"Integration folder no longer exists in any scanned library. "
+                f"If it moved or was renamed, a new row was created for the new "
+                f"path — remove this one with: python3 forget.py "
+                f'--integration "{iname}"',
+            )
+
     # Session folder token disagrees with the target its light frames name
     # (adjacent-aware; collected during the walk — frame tokens are not
     # stored in the DB). Sessions are named for the target the frames carry.
@@ -2499,6 +2572,13 @@ def main():
         "integration_no_manifest": [],
         "integration_missing_member": [],
         "integration_kind_mismatch": [],
+        # Row-lifecycle bookkeeping: which rows this pass actually saw, and
+        # which libraries it actually walked. A row unseen anywhere whose OWN
+        # library was walked is missing (finding, never auto-deleted — it may
+        # have moved to a configured-but-offline library; see forget.py).
+        "seen_session_ids": set(),
+        "seen_integration_paths": set(),
+        "scanned_library_ids": [],
     }
 
     for lib in libraries:
@@ -2507,6 +2587,7 @@ def main():
             log(f"Library '{lib['id']}': not mounted — skipped ({root})")
             continue
         log(f"Library '{lib['id']}'  ({root})")
+        obs["scanned_library_ids"].append(lib["id"])
         ingest_library(con, lib["id"], root, obs, locations, log)
         ingest_calibration(con, lib["id"], root, obs, log)
         ingest_integrations(con, lib["id"], root, obs, log)

@@ -36,6 +36,8 @@ data-quality section (see BACKLOG.md).
 | `UNPARSED_SESSION_NAME` | warning | Folder under a target not in 4-token grammar | Rename (see preflight) |
 | `TARGET_MISMATCH` | warning | Session token ≠ target its light frames name (compared via canonical key: separators/case/`_adjacent` stripped) | Rename the session + its notes/project/Results — or, when the difference is deliberate (device-catalog star name, folded alias), set `target_mismatch_ok = true` in the session's notes.toml |
 | `NOTES_MISSING` | info | No per-session notes.toml | Stamp from the template |
+| `SESSION_MISSING` | warning | Session row unseen in any scanned library (its own library WAS scanned; stale counts still in totals) | Moved to an offline library → clears on its next scan; renamed → see the successor hint; deleted on purpose → `forget.py "<session>"` |
+| `INTEGRATION_MISSING` | warning | Integration row's folder gone from every scanned library | Moved/renamed → new row exists, remove the old with `forget.py --integration`; deleted → same |
 
 ### Tier 2 — FITS-header cross-checks (one sampled light per session)
 

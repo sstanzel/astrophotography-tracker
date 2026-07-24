@@ -201,6 +201,38 @@ renames a WBPP-named master sitting loose in a set folder. Batch-friendly:
 stack as many sets as you like, then one `catalog.py --apply` files
 them all.
 
+## Moving sessions between libraries / removing a session's record
+
+Sessions are keyed by (target, rig, night) — the LIBRARY is not part of the
+identity — so **moving a session folder between tracked libraries never breaks
+anything**: the next scan that sees the destination re-points the same row.
+
+```bash
+# Year-end pull to a new archive drive:
+#   1. add the new drive as a [[library]] block in config.toml (role="archive")
+#   2. move the session folders onto it (Finder is fine — whole folders)
+#   3. mount it once and:
+python3 refresh.py                    # rows re-point to the new library
+#   4. park the drive offline — its rows persist untouched (unmounted
+#      libraries are always skipped; normal when traveling with one library)
+```
+
+A session folder that disappears from every scanned library raises a
+`SESSION_MISSING` warning on the Data Health panel — never an automatic
+deletion, because the scan can't tell "deleted on purpose" from "moved to an
+offline library" (the warning self-clears when that library is next scanned).
+For a deliberate deletion, YOU remove the record:
+
+```bash
+python3 forget.py "SH2_233 Redcat51 ASI585MCPro 2025-12-31"           # preview
+python3 forget.py "SH2_233 Redcat51 ASI585MCPro 2025-12-31" --apply   # remove record
+python3 forget.py --integration "<integration folder>" --apply        # same for integrations
+```
+
+forget refuses if the folder still exists in any mounted library, and warns
+about libraries it couldn't check. Every removal is logged to
+`_organization/dev/actions.log`.
+
 ## Reclaiming space (safe by construction)
 
 ```bash
