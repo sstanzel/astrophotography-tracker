@@ -10,6 +10,43 @@ and enough of the design sketch to resume cold.
 
 ---
 
+## Mono flat days: filter-aware flats + bidirectional nearest (minicam8)
+
+**Status:** designed · 2026-07-24
+
+Motivating case: `Mele2_data/NINA/Redcat51_minicam8/2026-07-11/` — a full-wheel
+flat day with no light session that night for the rig. `FLAT/` = 33×7 filters
+(L/R/G/B/H3nm/O3nm/S3nm, FlatWizard per-filter exposures 0.07–6.34s, gain 78);
+the sibling `DARK/` folder is really the **dark-flats** (231 frames whose
+exposure+filter match the flats one-for-one — NINA's Flat Wizard labels them
+`DARK_FlatWizard`). Currently surfaces in intake's *unattached* bucket — correct
+flag, nothing lost, out of crawl-phase scope. Design, decided with Steve:
+
+- **No per-filter subfolders, ever.** WBPP groups by FITS keywords
+  (FILTER/EXPTIME/GAIN/BINNING), not folders — one FLAT folder per set stands.
+  Folder structure serves humans + tracker matching, never the stacker.
+- **Classifier rule (intake/fits side):** a `DARK_FlatWizard` frame whose
+  (exposure, filter) matches a FLAT in the same night folder is a `dark_flat`,
+  not a dark — keeps 0.07–6.34s pseudo-darks out of dark-library matching.
+  `frames.filter` already exists (nina_v2 grammar) — no schema change.
+- **Placement:** per-session convention stands; no flat library revival. A flat
+  day files into the **nearest same-rig session within ±1 day** as host
+  ("morning-of" joins "morning-after" as a legal attachment — the 07-11 set's
+  frames are stamped morning 07-12, host = the 2026-07-12 night); siblings use
+  the existing notes pointer. No session in window → stays in intake's held
+  bucket (rename from "unattached" for this case).
+- **`resolve_flats()` gains:** (1) *filter-awareness* for mono — requirement =
+  distinct filters of kept lights, coverage = needed ⊆ set's filters; display
+  `with 07-12 (7/7)` / `nearest 07-11 (missing S3nm)`; OSC = degenerate
+  one-filter case, unchanged. (2) *bidirectional nearest*: prefer strictly-before
+  (unchanged), but when nothing precedes, fall back to nearest full set AFTER,
+  bounded (~14d), labeled `nearest 07-11 (3d later)`; bound + enable live in
+  `calibration_thresholds.toml` beside the other recipe knobs. Rationale: the
+  strictly-before rule encoded dust-predates-lights, but a filter-wheel rig
+  drifts slowly and a full-set anchor days later beats `none`.
+- Out of scope, unchanged: coverage panel stays bias/dark only; Bias/Dark
+  master conventions untouched.
+
 ## Masters shelf (`_Masters/` derived WBPP convenience folder)
 
 **Status:** designed, deferred · 2026-07-11
