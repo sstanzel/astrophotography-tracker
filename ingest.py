@@ -2018,6 +2018,10 @@ def validate(con, locations, obs, log):
     ingest, and standalone via validate.py. `obs` carries structural notes the
     ingest walk collected (things with no row in the DB)."""
     cur = con.cursor()
+    # Point-query cursor: re-executing the cursor a `for` loop is iterating
+    # resets it and silently ends the loop after one row, so every lookup
+    # nested inside a loop over `cur` must run on `q` instead.
+    q = con.cursor()
     cur.execute("DELETE FROM validation_findings")
     f = []  # (severity, code, scope, session_id, ref_path, message)
 
@@ -2070,7 +2074,7 @@ def validate(con, locations, obs, log):
                 fp,
                 f"Session date {sdate} is in the future.",
             )
-        dmin, dmax, nlight, ndays = cur.execute(
+        dmin, dmax, nlight, ndays = q.execute(
             """
             SELECT MIN(date(captured_at_utc)), MAX(date(captured_at_utc)),
                    COUNT(*), COUNT(DISTINCT date(captured_at_utc))
@@ -2082,7 +2086,7 @@ def validate(con, locations, obs, log):
         if not nlight:
             continue
         nxt = (datetime.date.fromisoformat(sdate) + datetime.timedelta(days=1)).isoformat()
-        on_date = cur.execute(
+        on_date = q.execute(
             """SELECT COUNT(*) FROM frames
             WHERE session_id=? AND frame_type='light'
               AND date(captured_at_utc) IN (?, ?)""",
@@ -2128,7 +2132,7 @@ def validate(con, locations, obs, log):
     for sid, fp, scope, sensor in cur.execute(
         "SELECT session_id, folder_path, scope, sensor " "FROM sessions WHERE NOT is_other_capture"
     ):
-        r = cur.execute("SELECT from_registry FROM scopes WHERE scope=?", (scope,)).fetchone()
+        r = q.execute("SELECT from_registry FROM scopes WHERE scope=?", (scope,)).fetchone()
         if r and not r[0]:
             add(
                 "warning",
@@ -2138,7 +2142,7 @@ def validate(con, locations, obs, log):
                 fp,
                 f"Scope '{scope}' is not in _organization/scope_values.",
             )
-        r = cur.execute("SELECT from_registry FROM sensors WHERE sensor=?", (sensor,)).fetchone()
+        r = q.execute("SELECT from_registry FROM sensors WHERE sensor=?", (sensor,)).fetchone()
         if r and not r[0]:
             add(
                 "warning",
@@ -2282,7 +2286,7 @@ def validate(con, locations, obs, log):
     # would otherwise slip through — and a camera folder that isn't the
     # registry sensor name can never match any light in the coverage report.
     def in_registry(table, col, name):
-        r = cur.execute(f"SELECT from_registry FROM {table} WHERE {col}=?", (name,)).fetchone()
+        r = q.execute(f"SELECT from_registry FROM {table} WHERE {col}=?", (name,)).fetchone()
         return bool(r and r[0])
 
     for cls, cam in cur.execute(
