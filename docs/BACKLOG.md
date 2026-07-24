@@ -110,21 +110,60 @@ and `PI Magic/` subtrees entirely (they are recreatable scratch, same rationale
 as `sweep.py`). Keep both audit checks afterwards as regression
 guards. Interim workaround: `sweep.py --apply` then re-scan.
 
-## Scan: prune session rows whose folders vanished
+## Session row lifecycle: missing-session finding + explicit forget
 
-**Status:** ready · 2026-07-23
+**Status:** designed · 2026-07-23 (supersedes the same-day "prune unseen rows"
+sketch — auto-pruning is WRONG; deletion needs a human)
 
-Found live: deleting the SH2 233 duplicate session (whole target folder
-removed from Peak) left its DB row intact — 257 phantom lights / 4.28 phantom
-hours in every total — because the scan upserts sessions it VISITS but never
-deletes rows for folders that no longer exist ("counts reflect disk" only
-holds per visited session; frames are delete+reinsert per session, sessions
-are forever). Interim remedy is the designed-in one: tracker.db is derived —
-delete it and rescan (done 2026-07-23). Real fix: at the end of each
-library's walk, delete sessions (frames cascade) for that library_id not
-seen this pass — same collect-then-sweep shape as `calibration_masters`'
-per-library rebuild. Also check integrations for the same gap (a deleted
-integration folder likely lingers identically).
+Found live: deleting the SH2 233 duplicate left a phantom DB row (257
+lights / 4.28 h in every total) — the scan upserts visited sessions but
+never removes rows for vanished folders. Interim remedy used: tracker.db is
+derived, delete + full rescan (done 2026-07-23; see the wart below).
+
+Facts the design rests on (verified in internal/scan.py):
+- The session natural key is LIBRARY-AGNOSTIC — (target_id, scope, sensor,
+  session_date); the upsert re-points library_id/folder_path on conflict. So
+  **moving a session folder between tracked libraries already self-heals**:
+  scan the destination once and the same row (same session_id) re-points.
+  Year-end archive pattern: add the new library as [[library]] (role=archive),
+  mount it once after the move, refresh, park it offline. Nothing breaks.
+- Unmounted libraries are skipped whole — rows belonging to a library not
+  scanned this pass carry no information and must never be touched (field/
+  travel use with only the laptop library is normal, not exceptional).
+
+Design:
+
+1. **Never auto-delete.** After a scan pass, a row is *missing* only when it
+   was NOT seen in ANY library scanned this pass AND its recorded library WAS
+   scanned. That state cannot distinguish "deleted on purpose" from "moved to
+   a configured-but-offline library" — so it becomes a `SESSION_MISSING`
+   validation warning (house rule: warning = needs a decision), never a
+   deletion. The finding self-clears when the destination library is next
+   mounted and scanned (upsert re-points the row).
+2. **Explicit approval to forget:** a small root verb, `forget.py
+   "<session folder name>"` — re-verifies the folder is absent from every
+   mounted library, lists any unmounted libraries it cannot check, deletes
+   the row (frames cascade), and logs to actions.log. Rare, deliberate,
+   auditable. (`--force` not needed; refusal when a library is unmounted can
+   be overridden by mounting it or accepting the listed caveat interactively
+   — decide exact UX at build time.)
+3. **Renames / re-targets** (a session renamed or moved under a different
+   target folder = new natural key): the old row goes SESSION_MISSING; the
+   finding message should hint at a likely successor (a new row this pass
+   with the same scope/sensor/date and frame count) so the human recognizes
+   a rename and forgets the old row with confidence.
+4. **Integrations get the same treatment** (a deleted/renamed integration
+   folder lingers identically today).
+5. **Enabler — make tracker.db FULLY derived again:** `integration_method`
+   persists only in the DB after sweep.py clears the working folders, so a
+   from-scratch rebuild blanks Method for previously-swept sessions (observed
+   2026-07-23: 198 null after rebuild, 23 re-detected from live scratch).
+   Stamp `integration_method` into notes.toml as a tracker-owned key (same
+   machinery as [capture] / flats_match): populate_notes writes it when
+   detected; the scan prefers the notes value when working folders are empty.
+   Then rebuilds and forgets are truly lossless and the "DB is derived"
+   guarantee is complete. (Historical swept sessions blanked by today's
+   rebuild: hand-restore from memory/dashboard history if it matters.)
 
 ## Graduate audit error checks into every-scan validate()
 
