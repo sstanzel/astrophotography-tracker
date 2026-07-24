@@ -34,7 +34,7 @@ data-quality section (see BACKLOG.md).
 | `UNPARSED_FITS` | warning | FITS files matching no filename grammar | Rename per the grammar, or move them out |
 | `UNKNOWN_SCOPE` / `UNKNOWN_SENSOR` | warning | Session token not in the registry | Add to the registry, or fix the folder name |
 | `UNPARSED_SESSION_NAME` | warning | Folder under a target not in 4-token grammar | Rename (see preflight) |
-| `TARGET_MISMATCH` | warning | Session token ≠ target its light frames name (adjacent-aware) | Rename the session + its notes/project/Results — frames are the truth |
+| `TARGET_MISMATCH` | warning | Session token ≠ target its light frames name (compared via canonical key: separators/case/`_adjacent` stripped) | Rename the session + its notes/project/Results — or, when the difference is deliberate (device-catalog star name, folded alias), set `target_mismatch_ok = true` in the session's notes.toml |
 | `NOTES_MISSING` | info | No per-session notes.toml | Stamp from the template |
 
 ### Tier 2 — FITS-header cross-checks (one sampled light per session)

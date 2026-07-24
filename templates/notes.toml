@@ -18,6 +18,10 @@
 location      = "Home"      # key into _organization/locations.toml
 allsky_logged = false       # was the all-sky camera running this night?
 culled        = false       # flip to true after blinking a night where every frame was kept.
+# target_mismatch_ok = true # uncomment when the folder/frame target difference is
+#                           # DELIBERATE (device-catalog star name, folded catalog
+#                           # alias) — silences the TARGET_MISMATCH warning for
+#                           # this session; say why on this line.
                             # Nothing auto-edits this flag. The tracker DB derives the Culled
                             # stage on its own when Rejected/ holds frames or the session has
                             # been integrated — so this flag exists only for the one case the

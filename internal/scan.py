@@ -245,6 +245,7 @@ def read_notes_toml(session_path, session_name):
         moon_age_days=None,
         edited=False,
         culled=False,
+        target_mismatch_ok=False,
         flats_with=None,
         bias_set=None,
         published=[],
@@ -259,7 +260,7 @@ def read_notes_toml(session_path, session_name):
         txt = open(p, encoding="utf-8").read()
     except OSError:
         return out
-    for flag in ("edited", "culled"):
+    for flag in ("edited", "culled", "target_mismatch_ok"):
         fm = re.search(r"^\s*" + flag + r"\s*=\s*(true|false)", txt, re.M | re.I)
         out[flag] = bool(fm) and fm.group(1).lower() == "true"
     out["published"] = parse_toml_tables(txt, "published")
@@ -1421,16 +1422,6 @@ def ingest_library(con, library_id, root, obs, locations, log):
                 else:
                     counts[ftype] += 1
 
-            # Sessions are named for the target the frames carry (decided
-            # 2026-07-23, the NGC 3718/3729 case) — flag a folder token that
-            # disagrees with what this session's lights actually name.
-            if light_targets and not tp["is_other"]:
-                modal = max(light_targets, key=light_targets.get)
-                if target_base(modal) != target_base(sm.group("target")):
-                    obs["target_mismatch"].append(
-                        (sid, rel_session, sm.group("target"), modal, light_targets[modal])
-                    )
-
             # Validation inputs: sample one light frame's FITS header, and read
             # the session's notes.toml. Both are best-effort.
             hdr = (
@@ -1439,6 +1430,19 @@ def ingest_library(con, library_id, root, obs, locations, log):
                 else dict(site_lat=None, site_lon=None, instrument=None, telescope=None)
             )
             notes = read_notes_toml(spath, sname)
+
+            # Sessions are named for the target the frames carry (decided
+            # 2026-07-23, the NGC 3718/3729 case) — flag a folder token that
+            # disagrees with what this session's lights actually name. A
+            # deliberate difference (device-catalog star names, folded catalog
+            # aliases) is acknowledged once with `target_mismatch_ok = true`
+            # in the session's notes.toml.
+            if light_targets and not tp["is_other"] and not notes["target_mismatch_ok"]:
+                modal = max(light_targets, key=light_targets.get)
+                if target_base(modal) != target_base(sm.group("target")):
+                    obs["target_mismatch"].append(
+                        (sid, rel_session, sm.group("target"), modal, light_targets[modal])
+                    )
             # A session with no FITS frames may still be a DSLR session whose
             # raws are CR3/NEF/... — count those so it is not flagged empty.
             fits_total = sum(counts.values()) + rejected

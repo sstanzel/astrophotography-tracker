@@ -85,6 +85,23 @@ def test_stamp_capture_leaves_hand_sections_alone():
     assert 'location = "Home"' in text
 
 
+def test_read_notes_toml_target_mismatch_ok_flag(tmp_path):
+    from scan import read_notes_toml
+
+    sdir = tmp_path / "HR_1228 Redcat51 ASI585MCPro 2025-11-09"
+    sdir.mkdir()
+    notes = sdir / "HR_1228 Redcat51 ASI585MCPro 2025-11-09 notes.toml"
+
+    notes.write_text('location = "Home"\nculled = false\n', encoding="utf-8")
+    assert read_notes_toml(str(sdir), sdir.name)["target_mismatch_ok"] is False
+
+    notes.write_text(
+        'location = "Home"\ntarget_mismatch_ok = true # ASIAir catalog says Menkib\n',
+        encoding="utf-8",
+    )
+    assert read_notes_toml(str(sdir), sdir.name)["target_mismatch_ok"] is True
+
+
 def test_target_base_normalizes_spellings():
     # Adjacent suffix and all separator/case habits collapse to one key.
     assert target_base("M 12") == "m12"
