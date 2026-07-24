@@ -18,14 +18,16 @@
 location      = "Home"      # key into _organization/locations.toml
 allsky_logged = false       # was the all-sky camera running this night?
 culled        = false       # flip to true after blinking a night where every frame was kept.
-# target_mismatch_ok = true # uncomment when the folder/frame target difference is
-#                           # DELIBERATE (device-catalog star name, folded catalog
-#                           # alias) — silences the TARGET_MISMATCH warning for
-#                           # this session; say why on this line.
                             # Nothing auto-edits this flag. The tracker DB derives the Culled
                             # stage on its own when Rejected/ holds frames or the session has
                             # been integrated — so this flag exists only for the one case the
                             # files can't show: reviewed, and every frame kept.
+# target_mismatch_ok = true # add (uncommented) ONLY when the folder/frame target
+#                           # difference is deliberate — device-catalog star name,
+#                           # folded catalog alias — and say why after the `true`.
+#                           # Silences TARGET_MISMATCH for this session. Absent
+#                           # means false; existing sessions don't carry this line
+#                           # unless they need it.
 
 [calibration]
 # Shared-flat night: when this session's flats live in a sibling session's
